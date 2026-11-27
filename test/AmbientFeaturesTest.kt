@@ -34,6 +34,7 @@ object AmbientFeaturesTest {
         testClockStylesAndSleepBadge()
         testAmbientClockLayoutSafeBoundsAllResolutions()
         testAmbientOverlayBlackoutDecoupledFromShowClock()
+        testNowPlayingAndWidgetModelsPrecomputedZeroAlloc()
 
         println("AmbientFeaturesTest: passed=$passed failed=$failed")
         if (failed > 0) System.exit(1)
@@ -227,5 +228,26 @@ object AmbientFeaturesTest {
         checkEq("showClock preserved false", false, ov.showClock)
         val def = AmbientOverlayData()
         checkEq("default showClock is true", true, def.showClock)
+    }
+
+    private fun testNowPlayingAndWidgetModelsPrecomputedZeroAlloc() {
+        val both = NowPlayingState("org.smarttube.stable", "SmartTube", "Live 4K", "Nature Channel", true)
+        checkEq("displayTitle uses title", "Live 4K", both.displayTitle)
+        checkEq("displaySubtitle joins artist and app", "Nature Channel · SmartTube", both.displaySubtitle)
+        check("displayTitle stored val (same ref)", both.displayTitle === both.displayTitle)
+        check("displaySubtitle stored val (same ref)", both.displaySubtitle === both.displaySubtitle)
+
+        val artistOnly = NowPlayingState("p", "", "Song", "Artist", true)
+        checkEq("displaySubtitle artist only", "Artist", artistOnly.displaySubtitle)
+        val appOnly = NowPlayingState("p", "Kinopoisk", "", "", false)
+        checkEq("displayTitle falls back to appLabel", "Kinopoisk", appOnly.displayTitle)
+        checkEq("displaySubtitle falls back to appLabel", "Kinopoisk", appOnly.displaySubtitle)
+
+        val snap = WeatherSnapshot("Казань", 7, 5, 10, WeatherIcon.CLEAR, "Ясно")
+        check("pillTempText stored val (same ref)", snap.pillTempText === snap.pillTempText)
+        check("ambientSummary stored val (same ref)", snap.ambientSummary === snap.ambientSummary)
+
+        val sleep = SleepTimerState(active = true, remainingSec = 900, warningActive = false)
+        check("badgeText stored val (same ref)", sleep.badgeText === sleep.badgeText)
     }
 }

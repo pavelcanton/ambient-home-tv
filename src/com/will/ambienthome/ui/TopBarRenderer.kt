@@ -67,7 +67,6 @@ internal class TopBarRenderer(
         visibleList.getOrElse(index) { TopAction.LAUNCHER_SETTINGS }
 
     fun draw(canvas: Canvas, frame: HomeRenderFrame, u: Float) {
-        syncVisibleActions(frame.weather != null, frame.btConnected, frame.sleepTimer.active)
         if (frame.showClock) {
             drawTopClock(canvas, frame.timeText, frame.dateText, frame.chromeAlpha, frame.nightActive, u)
         }

@@ -175,9 +175,9 @@ class SettingsActivity : Activity() {
             setPadding(dp(56), dp(28), dp(56), dp(24))
         }
         val verName = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "3.0.1"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "3.0.2"
         } catch (_: Throwable) {
-            "3.0.1"
+            "3.0.2"
         }
         outer.addView(TextView(this).apply {
             text = "Ambient Home $verName  ·  Настройки"

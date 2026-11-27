@@ -101,7 +101,7 @@ object WallpaperRepository {
 
     fun listCustomFiles(): List<File> {
         val found = ArrayList<File>()
-        forEachCustomImageFile { file, _, _ -> found.add(file) }
+        forEachCustomImageFile(verifyHeader = true) { file, _, _ -> found.add(file) }
         found.sortBy { it.name.lowercase() }
         return found
     }
@@ -112,7 +112,7 @@ object WallpaperRepository {
         var modXor = 0L
         var totalBytes = 0L
         var pathXor = 0
-        forEachCustomImageFile { file, len, path ->
+        forEachCustomImageFile(verifyHeader = false) { file, len, path ->
             count++
             val mod = file.lastModified()
             if (mod > maxMod) maxMod = mod
@@ -157,7 +157,7 @@ object WallpaperRepository {
         )
     }
 
-    private fun forEachCustomImageFile(visit: (File, Long, String) -> Unit) {
+    private fun forEachCustomImageFile(verifyHeader: Boolean, visit: (File, Long, String) -> Unit) {
         val seen = HashSet<String>()
         for (dirPath in CUSTOM_DIRS) {
             val children = try {
@@ -167,9 +167,11 @@ object WallpaperRepository {
                 null
             } ?: continue
             for (f in children) {
+                if (!f.isFile || !f.canRead()) continue
                 if (f.extension.lowercase() !in IMAGE_EXTS) continue
-                if (!LanWebRemoteRouter.hasValidImageFileHeader(f)) continue
                 val len = f.length()
+                if (len !in 64L..35_000_000L) continue
+                if (verifyHeader && !LanWebRemoteRouter.hasValidImageFileHeader(f)) continue
                 val path = f.absolutePath
                 if (seen.add(path)) visit(f, len, path)
             }
@@ -343,6 +345,7 @@ object WallpaperRepository {
     }
 
     private fun decodeFileScaled(file: File, reqW: Int, reqH: Int): Bitmap? {
+        if (!LanWebRemoteRouter.hasValidImageFileHeader(file)) return null
         return try {
             val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, probe)

@@ -1,4 +1,4 @@
-﻿# build.ps1 — сборка Ambient Home 3.0.1 (Kotlin unit tests + Pure Kotlin 2.1.10 + R8 shrinking + aapt2 + true STORED DEX + zipalign + apksigner).
+﻿# build.ps1 — сборка Ambient Home 3.0.2 (Kotlin unit tests + Pure Kotlin 2.1.10 + R8 shrinking + aapt2 + true STORED DEX + zipalign + apksigner).
 param(
     [switch]$SkipTests
 )

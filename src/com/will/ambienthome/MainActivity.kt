@@ -22,6 +22,7 @@ import com.will.ambienthome.data.WallpaperController
 import com.will.ambienthome.model.AmbientOverlayData
 import com.will.ambienthome.model.AppEntry
 import com.will.ambienthome.model.AppOrdering
+import com.will.ambienthome.model.AppsLayoutState
 import com.will.ambienthome.model.CustomShortcuts
 import com.will.ambienthome.model.HomeMode
 import com.will.ambienthome.model.HomeNavigation
@@ -30,9 +31,11 @@ import com.will.ambienthome.model.NowPlayingState
 import com.will.ambienthome.model.SleepTimerState
 import com.will.ambienthome.model.SystemStatus
 import com.will.ambienthome.model.TopAction
+import com.will.ambienthome.model.WolTarget
 import com.will.ambienthome.ui.HomeCanvasView
 import com.will.ambienthome.ui.TvDialogs
 import com.will.ambienthome.ui.WallpaperSurfaceView
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 
@@ -49,7 +52,8 @@ class MainActivity : Activity(), HomeCanvasView.Host {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val io = Executors.newSingleThreadExecutor()
+    private val localIo = Executors.newSingleThreadExecutor { r -> Thread(r, "ambient-local-io").apply { isDaemon = true } }
+    private val netIo = Executors.newSingleThreadExecutor { r -> Thread(r, "ambient-net-io").apply { isDaemon = true } }
 
     private lateinit var store: LauncherStore
     private lateinit var wallpaperView: WallpaperSurfaceView
@@ -73,9 +77,13 @@ class MainActivity : Activity(), HomeCanvasView.Host {
 
     @Volatile
     private var resumed: Boolean = false
+    @Volatile
+    private var lastPkgSeq: Int = -1
     private var loadedOnce: Boolean = false
     private var skipNextResumeAppRefresh: Boolean = false
     private var modeBeforeSettings: HomeMode = HomeMode.DOCK
+    private var lastLoadedWol: WolTarget? = null
+    private var lastAppliedLayout: AppsLayoutState? = null
 
     private var activeDialog: Dialog? = null
 
@@ -100,7 +108,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
 
     private val networkStatusTask = Runnable {
         if (!resumed) return@Runnable
-        runIo {
+        runLocalIo {
             val st = SystemStatusHelper.readSystemStatus(applicationContext)
             mainHandler.post {
                 if (!isFinishing && !isDestroyed) {
@@ -165,7 +173,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
 
         val skipRefresh = skipNextResumeAppRefresh
         skipNextResumeAppRefresh = false
-        if (!first && !skipRefresh) refreshAppsAsync(preservePkg = null)
+        if (!first && !skipRefresh) refreshAppsAsync(preservePkg = null, onlyIfChanged = true)
 
         wallpaperController.onResume(state)
         audioObserver.start()
@@ -208,7 +216,8 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         audioObserver.stop()
         mediaBridge.stop()
         systemObservers.stop()
-        io.shutdownNow()
+        localIo.shutdownNow()
+        netIo.shutdownNow()
         wallpaperView.release()
         super.onDestroy()
     }
@@ -340,7 +349,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         }
         setContentView(root)
 
-        wallpaperController = WallpaperController(applicationContext, store, mainHandler, ::runIo) { bmp, cap ->
+        wallpaperController = WallpaperController(applicationContext, store, mainHandler, ::runLocalIo, ::runNetIo) { bmp, cap ->
             ambientCaption = cap
             wallpaperView.setWallpaper(bmp)
         }
@@ -353,7 +362,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
             nowPlaying = np
             pushWidgetsState()
         }
-        features = MainFeatureCoordinator(this, store, mainHandler, ::runIo, buildFeatureCallbacks())
+        features = MainFeatureCoordinator(this, store, mainHandler, ::runLocalIo, ::runNetIo, buildFeatureCallbacks())
         systemObservers = MainSystemObservers(
             context = this,
             onPackagesChanged = { refreshAppsAsync(preservePkg = null) },
@@ -478,30 +487,64 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         }
     }
 
-    private fun runIo(task: () -> Unit): Boolean {
-        if (io.isShutdown || isFinishing || isDestroyed) return false
+    private fun runLocalIo(task: () -> Unit): Boolean = submitTo(localIo, "localIo", task)
+
+    private fun runNetIo(task: () -> Unit): Boolean = submitTo(netIo, "netIo", task)
+
+    private fun submitTo(exec: ExecutorService, name: String, task: () -> Unit): Boolean {
+        if (exec.isShutdown || isFinishing || isDestroyed) return false
         return try {
-            io.execute { try { task() } catch (t: Throwable) { Log.w(TAG, "io task failed", t) } }
+            exec.execute { try { task() } catch (t: Throwable) { Log.w(TAG, "$name task failed", t) } }
             true
         } catch (e: RejectedExecutionException) {
-            Log.w(TAG, "runIo rejected", e)
+            Log.w(TAG, "$name rejected", e)
             false
         }
     }
 
-    private fun refreshAppsAsync(preservePkg: String?) {
+    private fun refreshAppsAsync(preservePkg: String?, onlyIfChanged: Boolean = false) {
         val wol = state.features.wol
-        runIo {
+        val canFastSkip = onlyIfChanged && allApps.isNotEmpty() && wol == lastLoadedWol
+        runLocalIo {
+            val unchanged = probePackagesUnchanged()
+            if (canFastSkip && unchanged) {
+                mainHandler.post {
+                    if (!isFinishing && !isDestroyed && state.layout != lastAppliedLayout) {
+                        applyOrderedApps(preservePkg)
+                    }
+                }
+                return@runLocalIo
+            }
             val loaded = AppRepository.loadAll(applicationContext, wol)
             mainHandler.post {
                 if (isFinishing || isDestroyed) return@post
                 allApps = loaded
+                lastLoadedWol = wol
                 applyOrderedApps(preservePkg)
             }
         }
     }
 
+    private fun probePackagesUnchanged(): Boolean {
+        val prevSeq = lastPkgSeq
+        return try {
+            val changed = packageManager.getChangedPackages(prevSeq.coerceAtLeast(0))
+            if (changed != null) {
+                lastPkgSeq = changed.sequenceNumber
+                false
+            } else if (prevSeq < 0) {
+                lastPkgSeq = 0
+                false
+            } else {
+                true
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     private fun applyOrderedApps(preservePkg: String?) {
+        lastAppliedLayout = state.layout
         visibleApps = AppRepository.orderVisible(allApps, state.layout)
         homeView.setApps(visibleApps, state.layout.pinnedPackages.toSet(), preservePkg)
     }

@@ -10,7 +10,7 @@
 
 [Screenshots](#screenshots) · [Architecture](#architecture-highlights) · [Unrooted vs Root Bridge](#unrooted-stock-android-tv-vs-optional-root-bridge) · [Install](#installation) · [LAN Web Remote & REST API](#lan-web-remote-pwa--rest-api) · [Build from Source](#build-from-source) · [Privacy](#zero-telemetry-privacy-pledge) · [Русская версия](README.md)
 
-> **Localization Note (v3.0.1):** The current on-screen TV UI and embedded Web Remote UI are **Russian-first (`ru`)**. The codebase has zero external dependencies and is straightforward to localize — community PRs adding English (`res/values/strings.xml`) and additional languages are very welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Localization Note (v3.0.2):** The current on-screen TV UI and embedded Web Remote UI are **Russian-first (`ru`)**. The codebase has zero external dependencies and is straightforward to localize — community PRs adding English (`res/values/strings.xml`) and additional languages are very welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -30,7 +30,7 @@
 
 ---
 
-## Key Features (v3.0.1)
+## Key Features (v3.0.2)
 
 - **Clean Dock & Grid Modes:** Apple TV-style translucent dock with pinned favorites (`★`), manual reordering, app hiding, and full-screen All Apps grid (`minSdk=26`, `targetSdk=33`).
 - **4 Burn-in-Safe Ambient Clocks:** Thin, Cinema, Minimal, and Analog styles with 15-minute 4-corner burn-in hop and subtle pixel drift.
@@ -60,9 +60,9 @@ Ambient Home is built specifically to feel instantaneous on modest ARM/Mali Andr
 | **External Dependencies** | **0** — Pure Kotlin `2.1.10` + Android SDK (`android.jar` API 34) only (**0 AndroidX, 0 Jetpack, 0 Compose, 0 Gradle**) |
 | **Memory Footprint** | **~25 MB Total PSS** (`1` Activity, `7` Views, `0` WebViews) |
 | **Idle GPU Load** | **0%** — Wallpapers, scrims, night tints, and glass panels are pre-baked off the UI thread; zero continuous idle animations |
-| **Codebase Structure** | **38 Deslop modules** — every `.kt` file `< 600` lines (max `550` L), functions `<= 50` L, strict acyclic DAG (`root -> {ui, data, model}`, `0` `data.*` in `ui/`), `0` HWUI `.recycle()` |
-| **Automated Tests** | **591 pure-JVM unit tests** across 5 suites + **60 Node VM PWA checks** (run in seconds without an emulator) |
-| **Release Binary** | **~3.91 MB R8-shrunk APK** with `apksigner` v2+v3 signatures, `zipalign -p 4`, and uncompressed 4-byte-aligned `STORED` `classes.dex` (`mod4=0`) for zero-copy ART `mmap` |
+| **Codebase Structure** | **38 Deslop modules** — every `.kt` file `< 600` lines (max `593` L), functions `<= 50` L, strict acyclic DAG (`root -> {ui, data, model}`, `0` `data.*` in `ui/`), `0` HWUI `.recycle()` |
+| **Automated Tests** | **645 pure-JVM unit tests** across 5 suites + **60 Node VM PWA checks** (run in seconds without an emulator) |
+| **Release Binary** | **~2.99 MB R8-shrunk APK** (16:9 `1920x1080` WebP wallpapers) with `apksigner` v2+v3 signatures, `zipalign -p 4`, and uncompressed 4-byte-aligned `STORED` `classes.dex` (`mod4=0`) for zero-copy ART `mmap` |
 
 ---
 
@@ -105,11 +105,11 @@ chmod +x ./scripts/install-tv.sh
 
 ### Option 2: Manual ADB Install
 
-Download `AmbientHome-3.0.1.apk` from [GitHub Releases](https://github.com/pavelcanton/ambient-home-tv/releases) (see [Release Notes v3.0.1](docs/RELEASE_NOTES_v3.0.1.md)) or [build from source](#build-from-source), verify its SHA-256 checksum, and install:
+Download `AmbientHome-3.0.2.apk` from [GitHub Releases](https://github.com/pavelcanton/ambient-home-tv/releases) (see [Release Notes v3.0.2](docs/RELEASE_NOTES_v3.0.2.md)) or [build from source](#build-from-source), verify its SHA-256 checksum, and install:
 
 ```bash
 adb connect 192.168.1.x:5555
-adb install -r AmbientHome-3.0.1.apk
+adb install -r AmbientHome-3.0.2.apk
 adb shell cmd package compile -m speed -f com.will.ambienthome
 ```
 
@@ -145,7 +145,7 @@ When enabled (default **On**, toggleable **Off** anytime in Settings for `0%` ba
 | Method | Endpoint | Auth | Description |
 | --- | --- | :---: | --- |
 | `GET` | `/` | No | Embedded single-file Web Remote PWA (never embeds PIN) |
-| `GET` | `/api/ping` | No | Health check (`{"ok":true,"app":"AmbientHome","version":"3.0.1"}`) |
+| `GET` | `/api/ping` | No | Health check (`{"ok":true,"app":"AmbientHome","version":"3.0.2"}`) |
 | `GET` | `/api/status` | PIN | Live telemetry, Night Mode, Sleep Timer, Weather, installed apps, USB volumes, `bridgeAvailable` |
 | `POST` | `/api/launch` | PIN | Launch app: `{"package":"org.example.app"}` |
 | `POST` | `/api/action` | PIN | Trigger action: `night_toggle`, `night_on`, `night_off`, `night_auto`, `sleep_timer` (`{"action":"sleep_timer","minutes":30}`), `next_wallpaper`, `ambient_now`, `media_play_pause`, `media_next`, `wol`, `wifi_reconnect` |
@@ -204,7 +204,7 @@ chmod +x ./build.sh
 
 Both `build.ps1` and `build.sh` produce:
 - `AmbientHome.apk` (verified with `apksigner` v2+v3, `zipalign -c -p 4`, and `VerifyDexZip` `STORED mod4=0`)
-- `build/AmbientHome-3.0.1.apk.sha256`
+- `build/AmbientHome-3.0.2.apk.sha256`
 
 ### Release Signing (Optional Environment Variables)
 
@@ -226,16 +226,17 @@ Ambient Home collects **zero analytics, zero crash telemetry, zero ads, and zero
 - Outbound HTTPS traffic happens **only** when you explicitly enable optional features:
   1. **Weather widget (Off by default):** queries [Open-Meteo](https://open-meteo.com/) for your selected city at most every 45 minutes while `HOME` is open.
   2. **Photo of the Day wallpapers (Off by default):** fetches up to 3 daily images from Bing `HPImageArchive` (fallback: Wikimedia Commons POTD) at most every 12 hours while `HOME` is open.
-- **Bundled Wallpapers (`res/drawable-nodpi/w1..w5.jpg`):** All EXIF metadata is stripped cleanly from APK assets.
-  - `w4.jpg` (Grand Teton Sunrise): C.J. Adams / U.S. National Park Service (Public Domain).
-  - `w5.jpg` (Denali from Wonder Lake): Mary Lewandowski / U.S. National Park Service (Public Domain).
-  - `w1.jpg`, `w2.jpg`, `w3.jpg`: Wikimedia Commons CC0 / Public Domain nature photography.
+- **Bundled Wallpapers (`res/drawable-nodpi/w1..w5.webp`):** Center-cropped to exact `1920x1080` WebP (`q=85`) with all EXIF metadata stripped cleanly from APK assets.
+  - `w4.webp` (Grand Teton Sunrise): C.J. Adams / U.S. National Park Service (Public Domain).
+  - `w5.webp` (Denali from Wonder Lake): Mary Lewandowski / U.S. National Park Service (Public Domain).
+  - `w1.webp`, `w2.webp`, `w3.webp`: Wikimedia Commons CC0 / Public Domain nature photography.
 
 ---
 
 ## Release Notes & Documentation
 
 - [Русская версия README](README.md)
+- [Release Notes (v3.0.2)](docs/RELEASE_NOTES_v3.0.2.md)
 - [Release Notes (v3.0.1)](docs/RELEASE_NOTES_v3.0.1.md)
 - [Release Notes (v3.0.0)](docs/RELEASE_NOTES_v3.0.0.md)
 - [HK1 RBOX K8 (RK3528) Field Notes](docs/HK1_RBOX_K8_NOTES.md)

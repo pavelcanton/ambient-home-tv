@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0a0f18">
 <title>Ambient Home — Пульт</title>
 <style>
-:root{--bg:#090d14;--card:#121926;--btn:#1a2436;--btn2:#233149;--acc:#7fd8a0;--warn:#fbbf24;--err:#f87171;--txt:#f3f6fb;--mut:#8fa0b8;--bd:rgba(255,255,255,.22)}
+:root{--bg:#090d14;--card:#121926;--btn:#1a2436;--btn2:#233149;--acc:#7fd8a0;--warn:#fbbf24;--err:#f87171;--txt:#f3f6fb;--mut:#8fa0b8;--bd:rgba(255,255,255,.34)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0 auto;background:var(--bg);color:var(--txt);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:12px 12px 36px;max-width:560px}
 h1,h2,h3{margin:0 0 8px;font-weight:600}
@@ -48,7 +48,7 @@ code{background:#0b1019;padding:2px 6px;border-radius:6px;font-size:12px;color:#
 </head>
 <body>
 <header>
-  <h1><span>Ambient Home 3.0.1</span><span class="tag" id="badge">LAN</span></h1>
+  <h1><span>Ambient Home 3.0.2</span><span class="tag" id="badge">LAN</span></h1>
 </header>
 
 <main>
@@ -178,7 +178,10 @@ code{background:#0b1019;padding:2px 6px;border-radius:6px;font-size:12px;color:#
     invalid_image_magic: 'Файл не является корректным JPEG или PNG',
     invalid_afr_mode: 'Частота не поддерживается root-мостом',
     protected_package: 'Системное приложение защищено от остановки',
+    forbidden_package: 'Системное приложение защищено от остановки',
     bridge_fifo_missing: 'Требуется опциональный root-мост (remote.fifo)',
+    bridge_not_running: 'Root-мост не запущен (remote.fifo не отвечает)',
+    service_unavailable: 'Сервер пульта перегружен — повторите через секунду',
     city_not_found: 'Город не найден',
     invalid_mac: 'Некорректный MAC-адрес',
     app_not_found: 'Приложение не найдено',

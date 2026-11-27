@@ -128,8 +128,8 @@ esac
 
 TARGET="${HOST}:${PORT}"
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-LAUNCHER_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+LAUNCHER_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 if [ -z "$APK_PATH" ]; then
     APK_PATH="$LAUNCHER_ROOT/AmbientHome.apk"
 fi

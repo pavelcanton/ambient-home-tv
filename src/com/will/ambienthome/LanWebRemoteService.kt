@@ -113,7 +113,7 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
             .map { mapOf("w" to it.first, "h" to it.second, "fps" to it.third) }
         return linkedMapOf(
             "ok" to true,
-            "version" to "3.0.1",
+            "version" to "3.0.2",
             "bridgeAvailable" to RootBridgeClient.isAvailable(applicationContext),
             "nightActive" to nightNow,
             "nightMode" to st.features.night.mode.name,

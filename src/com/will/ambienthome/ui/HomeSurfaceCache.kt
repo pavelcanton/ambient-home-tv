@@ -53,9 +53,17 @@ internal class HomeSurfaceCache(
     private var wifiPillH: Int = 0
 
     private var weatherPillBmp: Bitmap? = null
-    private var weatherPillKey: String = ""
+    private var weatherPillIcon: WeatherIcon? = null
+    private var weatherPillLabel: String = ""
+    private var weatherPillW: Int = 0
+    private var weatherPillH: Int = 0
+    private var weatherPillFocused: Boolean = false
+
     private var sleepPillBmp: Bitmap? = null
-    private var sleepPillKey: String = ""
+    private var sleepPillBadge: String = ""
+    private var sleepPillW: Int = 0
+    private var sleepPillH: Int = 0
+    private var sleepPillFocused: Boolean = false
 
     private val titlePills = object : LinkedHashMap<String, Bitmap>(24, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean =
@@ -77,6 +85,9 @@ internal class HomeSurfaceCache(
                 dockBgBmp = it; dockBgW = w; dockBgH = h
             }
         } else {
+            if (dockBgBmp != null) {
+                dockBgBmp = null; dockBgW = 0; dockBgH = 0
+            }
             val existing = gridBgBmp
             if (existing != null && !existing.isRecycled && gridBgW == w && gridBgH == h) existing
             else bakePanel(w, h, 30f * u, 0xD40A0E16.toInt(), 0x2CFFFFFF, 1.5f * u).also {
@@ -143,8 +154,8 @@ internal class HomeSurfaceCache(
         topIconBitmaps.fill(null)
         topIconSize = 0
         wifiPillBmp = null; wifiPillStatusRef = null; wifiPillVisual = null; wifiPillW = 0; wifiPillH = 0
-        weatherPillBmp = null; weatherPillKey = ""
-        sleepPillBmp = null; sleepPillKey = ""
+        weatherPillBmp = null; weatherPillIcon = null; weatherPillLabel = ""; weatherPillW = 0; weatherPillH = 0; weatherPillFocused = false
+        sleepPillBmp = null; sleepPillBadge = ""; sleepPillW = 0; sleepPillH = 0; sleepPillFocused = false
         titlePills.clear(); titlePillH = 0; titlePillU = 0f
     }
 
@@ -205,9 +216,13 @@ internal class HomeSurfaceCache(
         focused: Boolean,
         u: Float
     ): Bitmap {
-        val key = "${icon.code}:$tempLabel:$wPx:$hPx:$focused"
         val existing = weatherPillBmp
-        if (existing != null && !existing.isRecycled && weatherPillKey == key) return existing
+        if (existing != null && !existing.isRecycled &&
+            weatherPillIcon == icon && weatherPillLabel == tempLabel &&
+            weatherPillW == wPx && weatherPillH == hPx && weatherPillFocused == focused
+        ) {
+            return existing
+        }
         val bmp = Bitmap.createBitmap(wPx, hPx, Bitmap.Config.ARGB_8888)
         val bc = Canvas(bmp)
         val inset = if (focused) 1.6f * u else 0.8f * u
@@ -216,14 +231,21 @@ internal class HomeSurfaceCache(
         drawPillText(bc, tempLabel, 48f * u, hPx / 2f, focused, u)
         bmp.prepareToDraw()
         weatherPillBmp = bmp
-        weatherPillKey = key
+        weatherPillIcon = icon
+        weatherPillLabel = tempLabel
+        weatherPillW = wPx
+        weatherPillH = hPx
+        weatherPillFocused = focused
         return bmp
     }
 
     private fun ensureSleepPill(badge: String, wPx: Int, hPx: Int, focused: Boolean, u: Float): Bitmap {
-        val key = "$badge:$wPx:$hPx:$focused"
         val existing = sleepPillBmp
-        if (existing != null && !existing.isRecycled && sleepPillKey == key) return existing
+        if (existing != null && !existing.isRecycled &&
+            sleepPillBadge == badge && sleepPillW == wPx && sleepPillH == hPx && sleepPillFocused == focused
+        ) {
+            return existing
+        }
         val bmp = Bitmap.createBitmap(wPx, hPx, Bitmap.Config.ARGB_8888)
         val bc = Canvas(bmp)
         val inset = if (focused) 1.6f * u else 0.8f * u
@@ -232,7 +254,10 @@ internal class HomeSurfaceCache(
         drawPillText(bc, badge, 44f * u, hPx / 2f, focused, u)
         bmp.prepareToDraw()
         sleepPillBmp = bmp
-        sleepPillKey = key
+        sleepPillBadge = badge
+        sleepPillW = wPx
+        sleepPillH = hPx
+        sleepPillFocused = focused
         return bmp
     }
 

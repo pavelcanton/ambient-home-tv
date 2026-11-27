@@ -418,6 +418,7 @@ object AppRepository {
                 color = 0x24FFFFFF
             }
             c.drawRoundRect(RectF(1f, 1f, TILE_PX - 1f, TILE_PX - 1f), r - 1f, r - 1f, glossPaint)
+            masked.prepareToDraw()
             return masked
         } catch (t: Throwable) {
             masked.recycle()

@@ -97,11 +97,9 @@ data class WeatherSnapshot(
     val daily: List<DailyForecast> = emptyList(),
     val fetchedAtMs: Long = 0L
 ) {
-    val pillTempText: String
-        get() = if (tempC > 0) "+${tempC}°" else "${tempC}°"
+    val pillTempText: String = if (tempC > 0) "+${tempC}°" else "${tempC}°"
 
-    val ambientSummary: String
-        get() = "$pillTempText · $condition"
+    val ambientSummary: String = "$pillTempText · $condition"
 }
 
 data class CityPreset(
@@ -118,15 +116,13 @@ data class NowPlayingState(
     val artist: String,
     val isPlaying: Boolean
 ) {
-    val displayTitle: String
-        get() = title.ifBlank { appLabel }
+    val displayTitle: String = title.ifBlank { appLabel }
 
-    val displaySubtitle: String
-        get() = when {
-            artist.isNotBlank() && appLabel.isNotBlank() -> "$artist · $appLabel"
-            artist.isNotBlank() -> artist
-            else -> appLabel
-        }
+    val displaySubtitle: String = when {
+        artist.isNotBlank() && appLabel.isNotBlank() -> "$artist · $appLabel"
+        artist.isNotBlank() -> artist
+        else -> appLabel
+    }
 }
 
 data class SleepTimerState(
@@ -134,12 +130,11 @@ data class SleepTimerState(
     val remainingSec: Int = 0,
     val warningActive: Boolean = false
 ) {
-    val badgeText: String
-        get() {
-            if (!active || remainingSec <= 0) return ""
-            val mins = (remainingSec + 59) / 60
-            return if (remainingSec <= 60) "${remainingSec}с" else "${mins}м"
-        }
+    val badgeText: String = when {
+        !active || remainingSec <= 0 -> ""
+        remainingSec <= 60 -> "${remainingSec}с"
+        else -> "${(remainingSec + 59) / 60}м"
+    }
 }
 
 data class BootAutoLaunchConfig(

@@ -34,6 +34,7 @@ internal class MainFeatureCoordinator(
     private val store: LauncherStore,
     private val mainHandler: Handler,
     private val ioRunner: (() -> Unit) -> Boolean,
+    private val netRunner: (() -> Unit) -> Boolean = ioRunner,
     private val host: Callbacks
 ) {
 
@@ -176,8 +177,8 @@ internal class MainFeatureCoordinator(
             }
         }
         if (!force && !WeatherClient.isStale(cfg)) return
-        ioRunner {
-            val fresh = WeatherClient.fetchForecast(cfg)
+        netRunner {
+            val fresh = WeatherClient.fetchForecast(cfg, force = force)
             mainHandler.post {
                 if (activity.isFinishing || activity.isDestroyed) return@post
                 if (fresh != null) {
@@ -300,7 +301,7 @@ internal class MainFeatureCoordinator(
                 initialValue = host.currentState().features.weather.cityName,
                 onSubmit = { query ->
                     if (query.length < 2) return@showTextInput
-                    ioRunner {
+                    netRunner {
                         val found = WeatherClient.searchCity(query).firstOrNull()
                         mainHandler.post {
                             if (activity.isFinishing || activity.isDestroyed) return@post

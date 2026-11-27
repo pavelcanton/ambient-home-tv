@@ -19,6 +19,7 @@ class WallpaperController(
     private val store: LauncherStore,
     private val mainHandler: Handler,
     private val ioRunner: (() -> Unit) -> Boolean,
+    private val netRunner: (() -> Unit) -> Boolean = ioRunner,
     private val onWallpaperReady: (Bitmap, String) -> Unit
 ) {
 
@@ -226,7 +227,7 @@ class WallpaperController(
 
     private fun maybeRefreshDailyOnline() {
         if (state.appearance.wallpaperSource != WallpaperSource.ONLINE_DAILY) return
-        ioRunner {
+        netRunner {
             val changed = OnlineWallpaperProvider.refreshIfDue(appContext)
             if (changed) {
                 mainHandler.post {

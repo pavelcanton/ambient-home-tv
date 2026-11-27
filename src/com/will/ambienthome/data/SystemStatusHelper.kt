@@ -285,16 +285,21 @@ object SystemStatusHelper {
         }
     }
 
-    private fun readMemInfoKb(): Pair<Long, Long> {
+    private fun readMemInfoKb(): Pair<Long, Long> = readMemInfoKbFrom(File("/proc/meminfo"))
+
+    internal fun readMemInfoKbFrom(file: File): Pair<Long, Long> {
         var memTotalKb = 0L
         var memAvailKb = 0L
         try {
-            val f = File("/proc/meminfo")
-            if (f.isFile && f.canRead()) {
-                f.forEachLine { line ->
-                    when {
-                        line.startsWith("MemTotal:") -> memTotalKb = parseFirstLong(line)
-                        line.startsWith("MemAvailable:") -> memAvailKb = parseFirstLong(line)
+            if (file.isFile && file.canRead()) {
+                file.bufferedReader().use { br ->
+                    while (true) {
+                        val line = br.readLine() ?: break
+                        when {
+                            memTotalKb == 0L && line.startsWith("MemTotal:") -> memTotalKb = parseFirstLong(line)
+                            memAvailKb == 0L && line.startsWith("MemAvailable:") -> memAvailKb = parseFirstLong(line)
+                        }
+                        if (memTotalKb > 0L && memAvailKb > 0L) break
                     }
                 }
             }

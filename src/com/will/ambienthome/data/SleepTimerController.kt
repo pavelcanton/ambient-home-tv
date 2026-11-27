@@ -126,6 +126,7 @@ object SleepTimerController {
 
     private val tickTask = object : Runnable {
         override fun run() {
+            if (stateListener == null) return
             val dl = triggerState.snapshotDeadline()
             if (dl <= 0L) {
                 emitState(SleepTimerState())
@@ -139,8 +140,7 @@ object SleepTimerController {
             }
             val remSec = ((remMs + 999L) / 1000L).toInt().coerceAtLeast(1)
             emitState(SleepTimerState(active = true, remainingSec = remSec, warningActive = remSec <= WARNING_SEC))
-            val delay = if (remSec <= WARNING_SEC + 2) 1000L else 10_000L
-            handler.postDelayed(this, delay)
+            handler.postDelayed(this, nextTickDelayMs(remMs))
         }
     }
 
@@ -151,11 +151,16 @@ object SleepTimerController {
         stateListener = onState
         blackoutListener = onBlackout
         onState(currentState())
+        if (triggerState.snapshotDeadline() > 0L) {
+            handler.removeCallbacks(tickTask)
+            handler.post(tickTask)
+        }
     }
 
     fun detachListeners() {
         stateListener = null
         blackoutListener = null
+        handler.removeCallbacks(tickTask)
     }
 
     fun startTimer(ctx: Context, minutes: Int) {
@@ -173,7 +178,19 @@ object SleepTimerController {
         finishPendingBroadcast()
         scheduleAlarm(appCtx, deadline)
         handler.removeCallbacks(tickTask)
-        handler.post(tickTask)
+        if (stateListener != null) handler.post(tickTask)
+    }
+
+    internal fun nextTickDelayMs(remMs: Long): Long {
+        if (remMs <= 0L) return 0L
+        val remSec = ((remMs + 999L) / 1000L).toInt().coerceAtLeast(1)
+        if (remSec <= 60) {
+            val subSec = remMs % 1000L
+            return (if (subSec == 0L) 1000L else subSec) + 25L
+        }
+        val subMin = remMs % 60_000L
+        val toBoundary = if (subMin == 0L) 60_000L else subMin
+        return (toBoundary + 50L).coerceAtLeast(200L)
     }
 
     fun cancel(ctx: Context) {

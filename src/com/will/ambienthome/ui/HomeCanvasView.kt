@@ -135,10 +135,13 @@ class HomeCanvasView(
         nowPlaying: NowPlayingState?,
         countdownBanner: String
     ) {
+        val sleepChanged = this.sleepTimer.active != sleepTimer.active ||
+            this.sleepTimer.badgeText != sleepTimer.badgeText ||
+            this.sleepTimer.warningActive != sleepTimer.warningActive
         val changed = this.nightActive != nightActive ||
             this.btConnected != btConnected ||
             this.weather != weather ||
-            this.sleepTimer != sleepTimer ||
+            sleepChanged ||
             this.nowPlaying != nowPlaying ||
             this.countdownBanner != countdownBanner
         this.nightActive = nightActive

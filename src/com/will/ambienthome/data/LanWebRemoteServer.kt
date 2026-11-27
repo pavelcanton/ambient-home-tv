@@ -11,20 +11,24 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URLDecoder
-import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
- * Лёгкий HTTP/1.1 сервер на чистом Kotlin (ServerSocket) для LAN Web-пульта Ambient Home 3.0.1.
- * 0.0% CPU в простое (блокирующий accept()), пул из 4 daemon-потоков, общие дедлайны заголовков/тела
- * (защита от Slowloris), Expect: 100-continue и строгие заголовки безопасности (CSP, XFO, Referrer-Policy).
+ * Лёгкий HTTP/1.1 сервер на чистом Kotlin (ServerSocket) для LAN Web-пульта Ambient Home 3.0.2.
+ * 0.0% CPU в простое (блокирующий accept()), ограниченный пул daemon-потоков (4 + очередь 32 -> 503),
+ * общие дедлайны заголовков/тела (защита от Slowloris), Expect: 100-continue и строгие заголовки безопасности.
  */
 class LanWebRemoteServer(
     private val port: Int,
     private val router: LanWebRemoteRouter,
     private val socketTimeoutMs: Int = SOCKET_TIMEOUT_MS,
     private val headerDeadlineMs: Long = HEADER_DEADLINE_MS,
-    private val bodyDeadlineMs: Long = BODY_DEADLINE_MS
+    private val bodyDeadlineMs: Long = BODY_DEADLINE_MS,
+    private val maxWorkers: Int = DEFAULT_MAX_WORKERS,
+    private val maxQueue: Int = DEFAULT_MAX_QUEUE
 ) {
 
     private companion object {
@@ -32,6 +36,9 @@ class LanWebRemoteServer(
         const val SOCKET_TIMEOUT_MS = 6000
         const val HEADER_DEADLINE_MS = 10_000L
         const val BODY_DEADLINE_MS = 30_000L
+        const val DEFAULT_MAX_WORKERS = 4
+        const val DEFAULT_MAX_QUEUE = 32
+        const val WORKER_IDLE_TIMEOUT_SEC = 30L
         const val MAX_HEADER_BYTES = 16 * 1024
         const val MAX_HEADER_LINES = 64
         const val CSP_HEADER =
@@ -97,10 +104,33 @@ class LanWebRemoteServer(
             try {
                 workerPool.execute { handleClient(client) }
             } catch (_: Throwable) {
+                rejectBusyClient(client)
+            }
+        }
+    }
+
+    private fun rejectBusyClient(client: Socket) {
+        try {
+            if (running) {
+                client.soTimeout = 1000
+                writeHttpResponse(
+                    client.getOutputStream(),
+                    LanWebRemoteRouter.HttpResponse(
+                        503,
+                        "application/json; charset=utf-8",
+                        "{\"ok\":false,\"error\":\"service_unavailable\"}".toByteArray(Charsets.UTF_8)
+                    )
+                )
                 try {
-                    client.close()
+                    client.shutdownOutput()
                 } catch (_: Throwable) {
                 }
+            }
+        } catch (_: Throwable) {
+        } finally {
+            try {
+                client.close()
+            } catch (_: Throwable) {
             }
         }
     }
@@ -228,7 +258,7 @@ class LanWebRemoteServer(
         val deadlineNs = System.nanoTime() + headerDeadlineMs * 1_000_000L
         var state = 0
         while (out.size() < MAX_HEADER_BYTES) {
-            if (!applyRemainingTimeout(socket, deadlineNs)) return HeaderBlock.Timeout
+            if (input.available() == 0 && !applyRemainingTimeout(socket, deadlineNs)) return HeaderBlock.Timeout
             val b = try {
                 input.read()
             } catch (_: SocketTimeoutException) {
@@ -256,7 +286,7 @@ class LanWebRemoteServer(
         val deadlineNs = System.nanoTime() + bodyDeadlineMs * 1_000_000L
         var off = 0
         while (off < size) {
-            if (!applyRemainingTimeout(socket, deadlineNs)) return BodyRead.Timeout
+            if (input.available() == 0 && !applyRemainingTimeout(socket, deadlineNs)) return BodyRead.Timeout
             val n = try {
                 input.read(buf, off, size - off)
             } catch (_: SocketTimeoutException) {
@@ -326,6 +356,7 @@ class LanWebRemoteServer(
             413 -> "Payload Too Large"
             429 -> "Too Many Requests"
             431 -> "Request Header Fields Too Large"
+            503 -> "Service Unavailable"
             else -> "Error"
         }
         val head = "HTTP/1.1 ${res.status} $reason\r\n" +
@@ -356,7 +387,12 @@ class LanWebRemoteServer(
         }
     }
 
-    private fun newPool() = Executors.newFixedThreadPool(4, ThreadFactory { r ->
-        Thread(r, "ambient-web-worker").apply { isDaemon = true }
-    })
+    private fun newPool(): ThreadPoolExecutor = ThreadPoolExecutor(
+        maxWorkers.coerceAtLeast(1),
+        maxWorkers.coerceAtLeast(1),
+        WORKER_IDLE_TIMEOUT_SEC,
+        TimeUnit.SECONDS,
+        ArrayBlockingQueue(maxQueue.coerceAtLeast(1)),
+        ThreadFactory { r -> Thread(r, "ambient-web-worker").apply { isDaemon = true } }
+    ).apply { allowCoreThreadTimeOut(true) }
 }

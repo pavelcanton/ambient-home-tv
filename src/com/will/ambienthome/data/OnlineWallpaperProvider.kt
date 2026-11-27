@@ -97,6 +97,7 @@ object OnlineWallpaperProvider {
                 relUrl.startsWith("/") -> "https://www.bing.com$relUrl"
                 else -> continue
             }
+            if (!isAllowedImageHost(fullUrl)) continue
             val dateKey = (obj["startdate"] as? String)?.trim().orEmpty().ifEmpty { "img${out.size}" }
             val title = (obj["title"] as? String)?.trim().orEmpty()
             val copyright = (obj["copyright"] as? String)?.substringBefore(" (")?.trim().orEmpty()
@@ -121,12 +122,26 @@ object OnlineWallpaperProvider {
             val infos = page["imageinfo"] as? List<*> ?: continue
             val info = infos.firstOrNull() as? Map<*, *> ?: continue
             val url = ((info["thumburl"] as? String) ?: (info["url"] as? String))?.trim().orEmpty()
-            if (!url.startsWith("https://")) continue
+            if (!isAllowedImageHost(url)) continue
             if (!url.lowercase().contains(".jpg") && !url.lowercase().contains(".jpeg")) continue
             val title = (page["title"] as? String)?.removePrefix("File:")?.substringBeforeLast('.')?.trim().orEmpty()
             out.add(DailyWallpaperMeta(url, title.take(120), "wiki_$id"))
         }
         return out
+    }
+
+    internal fun isAllowedImageHost(urlStr: String): Boolean {
+        val parsed = try {
+            URL(urlStr)
+        } catch (_: Throwable) {
+            return false
+        }
+        if (!parsed.protocol.equals("https", ignoreCase = true)) return false
+        if (!parsed.userInfo.isNullOrEmpty()) return false
+        if (parsed.port != -1 && parsed.port != 443) return false
+        val host = parsed.host?.trim()?.lowercase()?.trimEnd('.') ?: return false
+        if (host.isEmpty()) return false
+        return host == "bing.com" || host.endsWith(".bing.com") || host == "upload.wikimedia.org"
     }
 
     internal fun shouldAttemptRefresh(nowElapsedMs: Long, hasCache: Boolean, force: Boolean): Boolean {
@@ -251,7 +266,7 @@ object OnlineWallpaperProvider {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 requestMethod = "GET"
-                setRequestProperty("User-Agent", "AmbientHome/3.0.1 (AndroidTV)")
+                setRequestProperty("User-Agent", "AmbientHome/3.0.2 (AndroidTV)")
             }
             if (conn.responseCode != 200) return null
             readBoundedUtf8(conn.inputStream, MAX_HTTP_JSON_BYTES)
@@ -264,6 +279,7 @@ object OnlineWallpaperProvider {
     }
 
     private fun downloadJpeg(urlStr: String, target: File): Boolean {
+        if (!isAllowedImageHost(urlStr)) return false
         var conn: HttpURLConnection? = null
         val tmp = File(target.parentFile, "${target.name}.tmp")
         return try {
@@ -271,9 +287,10 @@ object OnlineWallpaperProvider {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 requestMethod = "GET"
-                setRequestProperty("User-Agent", "AmbientHome/3.0.1 (AndroidTV)")
+                setRequestProperty("User-Agent", "AmbientHome/3.0.2 (AndroidTV)")
             }
             if (conn.responseCode != 200) return false
+            if (!isAllowedImageHost(conn.url.toString())) return false
             val ok = streamWithMagicCheck(conn.inputStream, tmp)
             if (ok && tmp.renameTo(target)) true else {
                 tmp.delete()

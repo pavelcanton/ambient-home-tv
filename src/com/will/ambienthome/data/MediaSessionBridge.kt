@@ -35,6 +35,8 @@ class MediaSessionBridge(
     private var activeController: MediaController? = null
     private var controllerCallback: MediaController.Callback? = null
     private var lastEmitted: NowPlayingState? = null
+    private var cachedLabelPkg: String = ""
+    private var cachedLabelValue: String = ""
     private var started: Boolean = false
 
     fun start() {
@@ -182,12 +184,16 @@ class MediaSessionBridge(
     }
 
     private fun resolveAppLabel(pkg: String): String {
-        return try {
+        if (pkg == cachedLabelPkg && cachedLabelValue.isNotEmpty()) return cachedLabelValue
+        val label = try {
             val ai = appContext.packageManager.getApplicationInfo(pkg, 0)
             appContext.packageManager.getApplicationLabel(ai).toString().trim().ifEmpty { pkg }
         } catch (_: Throwable) {
             pkg
         }
+        cachedLabelPkg = pkg
+        cachedLabelValue = label
+        return label
     }
 
     private fun hasTitle(ctrl: MediaController): Boolean =

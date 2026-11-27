@@ -93,7 +93,12 @@ foreach ($it in $items) {
     }
 }
 
-function Install-Archive([string]$ZipPath, [string]$TargetDir) {
+function Install-Archive {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [string]$ZipPath,
+        [string]$TargetDir
+    )
     if (Test-Path -LiteralPath $TargetDir) { return }
     if (-not $PSCmdlet.ShouldProcess($TargetDir, "Extract $ZipPath")) { return }
     $tmpDir = "${TargetDir}_tmp"

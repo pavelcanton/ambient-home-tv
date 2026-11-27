@@ -1,18 +1,19 @@
 package com.will.ambienthome.data
 
+import android.os.SystemClock
 import com.will.ambienthome.model.MiniJson
 import java.io.File
 import java.io.FileInputStream
 
 /**
- * Чистый маршрутизатор и шлюз безопасности LAN Web-пульта Ambient Home 3.0.0.
- * 100% JVM-тестируемый (0 Android-вызовов):
+ * Чистый маршрутизатор и шлюз безопасности LAN Web-пульта Ambient Home 3.0.2.
+ * 100% JVM-тестируемый (монотонный clock с JVM-фолбэком):
  * - Constant-time проверка 6-значного PIN в заголовке X-Auth-Token для всех /api/ маршрутов (кроме /api/ping);
  * - Жёсткие лимиты размера (64 КБ JSON, 10 МБ обои), валидация имени файла и magic bytes JPEG/PNG.
  */
 class LanWebRemoteRouter(
     private val backend: Backend,
-    private val clockMs: () -> Long = { System.currentTimeMillis() }
+    private val clockMs: () -> Long = { monotonicClockMs() }
 ) {
 
     data class HttpRequest(
@@ -40,15 +41,16 @@ class LanWebRemoteRouter(
     }
 
     private var consecutiveAuthFailures: Int = 0
-    private var authLockoutUntilMs: Long = 0L
+    private var authLocked: Boolean = false
+    private var authLockoutStartMs: Long = 0L
 
     @Synchronized
     fun checkAuthForPath(path: String, headers: Map<String, String>): Int {
         if (!path.startsWith("/api/") || path == "/api/ping") return 0
         val now = clockMs()
-        if (authLockoutUntilMs > 0L) {
-            if (now < authLockoutUntilMs) return 429
-            authLockoutUntilMs = 0L
+        if (authLocked) {
+            if ((now - authLockoutStartMs) in 0L until AUTH_LOCKOUT_MS) return 429
+            authLocked = false
             consecutiveAuthFailures = 0
         }
         if (isAuthorizedHeaders(headers)) {
@@ -57,7 +59,8 @@ class LanWebRemoteRouter(
         }
         consecutiveAuthFailures++
         if (consecutiveAuthFailures >= MAX_AUTH_FAILURES) {
-            authLockoutUntilMs = now + AUTH_LOCKOUT_MS
+            authLocked = true
+            authLockoutStartMs = now
         }
         return 401
     }
@@ -69,7 +72,7 @@ class LanWebRemoteRouter(
             return HttpResponse(200, CT_HTML, backend.htmlShell())
         }
         if (method == "GET" && path == "/api/ping") {
-            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.1"))
+            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.2"))
         }
         if (!path.startsWith("/api/")) {
             return jsonResponse(404, mapOf("ok" to false, "error" to "not_found"))
@@ -88,7 +91,7 @@ class LanWebRemoteRouter(
             return HttpResponse(200, CT_HTML, backend.htmlShell())
         }
         if (method == "GET" && path == "/api/ping") {
-            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.1"))
+            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.2"))
         }
         if (!path.startsWith("/api/")) {
             return jsonResponse(404, mapOf("ok" to false, "error" to "not_found"))
@@ -208,6 +211,12 @@ class LanWebRemoteRouter(
         private val PNG_MAGIC = byteArrayOf(
             0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
         )
+
+        internal fun monotonicClockMs(): Long = try {
+            SystemClock.elapsedRealtime()
+        } catch (_: Throwable) {
+            System.nanoTime() / 1_000_000L
+        }
 
         internal fun isValidPackageName(pkg: String): Boolean =
             SAFE_PKG_REGEX.matches(pkg) &&

@@ -22,6 +22,7 @@ object WeatherClient {
 
     private const val TAG = "AmbientHome"
     const val REFRESH_TTL_MS = 45L * 60L * 1000L
+    internal const val FAILURE_BACKOFF_MS = 15L * 60L * 1000L
     private const val CONNECT_TIMEOUT_MS = 6000
     private const val READ_TIMEOUT_MS = 7000
 
@@ -42,8 +43,16 @@ object WeatherClient {
         CityPreset("Самара", "Россия", 53.1959, 50.1002)
     )
 
+    private val fetchLock = Any()
+
     @Volatile
     private var cachedEntry: CachedEntry? = null
+
+    @Volatile
+    private var lastFailureKey: String = ""
+
+    @Volatile
+    private var lastFailureElapsedMs: Long = -1L
 
     internal var elapsedClockMs: () -> Long = { OnlineWallpaperProvider.safeElapsedMs() }
 
@@ -55,14 +64,24 @@ object WeatherClient {
 
     fun isStale(config: WeatherConfig, nowElapsedMs: Long = elapsedClockMs()): Boolean {
         if (!config.isConfigured) return true
+        if (isInFailureBackoff(config, nowElapsedMs)) return false
         val entry = cachedEntry ?: return true
         if (entry.cityKey != cityKey(config)) return true
         val age = nowElapsedMs - entry.fetchedElapsedMs
         return age < 0L || age >= REFRESH_TTL_MS
     }
 
-    fun fetchForecast(config: WeatherConfig): WeatherSnapshot? {
-        if (!config.isConfigured) return null
+    fun fetchForecast(config: WeatherConfig, force: Boolean = false): WeatherSnapshot? =
+        fetchForecastWith(config, force, ::httpGet)
+
+    internal fun fetchForecastWith(
+        config: WeatherConfig,
+        force: Boolean = false,
+        fetcher: (String) -> String?
+    ): WeatherSnapshot? = synchronized(fetchLock) {
+        if (!config.isConfigured) return@synchronized null
+        val now = elapsedClockMs()
+        if (!force && !isStale(config, now)) return@synchronized getCached(config)
         val url = String.format(
             Locale.US,
             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f" +
@@ -72,10 +91,23 @@ object WeatherClient {
             config.latitude,
             config.longitude
         )
-        val body = httpGet(url) ?: return getCached(config)
-        val parsed = parseForecastJson(body, config.cityName, System.currentTimeMillis()) ?: return getCached(config)
+        val body = fetcher(url)
+        val parsed = if (body != null) parseForecastJson(body, config.cityName, System.currentTimeMillis()) else null
+        if (parsed == null) {
+            lastFailureKey = cityKey(config)
+            lastFailureElapsedMs = elapsedClockMs()
+            return@synchronized getCached(config)
+        }
         cachedEntry = CachedEntry(cityKey(config), parsed, elapsedClockMs())
-        return parsed
+        lastFailureKey = ""
+        lastFailureElapsedMs = -1L
+        parsed
+    }
+
+    internal fun isInFailureBackoff(config: WeatherConfig, nowElapsedMs: Long = elapsedClockMs()): Boolean {
+        val failAt = lastFailureElapsedMs
+        if (failAt < 0L || lastFailureKey != cityKey(config)) return false
+        return (nowElapsedMs - failAt) in 0L until FAILURE_BACKOFF_MS
     }
 
     fun searchCity(query: String): List<CityPreset> {
@@ -146,6 +178,8 @@ object WeatherClient {
 
     internal fun clearCacheForTest() {
         cachedEntry = null
+        lastFailureKey = ""
+        lastFailureElapsedMs = -1L
     }
 
     private fun parseHourly(hourly: Map<*, *>?): List<HourlyForecast> {
@@ -205,7 +239,7 @@ object WeatherClient {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 requestMethod = "GET"
-                setRequestProperty("User-Agent", "AmbientHome/3.0.1 (AndroidTV)")
+                setRequestProperty("User-Agent", "AmbientHome/3.0.2 (AndroidTV)")
             }
             if (conn.responseCode != 200) return null
             OnlineWallpaperProvider.readBoundedUtf8(conn.inputStream, OnlineWallpaperProvider.MAX_HTTP_JSON_BYTES)

@@ -31,13 +31,13 @@ USAGE
     esac
 done
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 OUT="$ROOT/build"
 
 TC=""
 for cand in "${AMBIENT_TOOLCHAIN_ROOT:-}" "$ROOT/tools/android-build" "$ROOT/../tools/android-build"; do
     if [ -n "$cand" ] && [ -d "$cand" ]; then
-        TC="$(CDPATH= cd -- "$cand" && pwd)"
+        TC="$(CDPATH='' cd -- "$cand" && pwd)"
         break
     fi
 done

@@ -43,18 +43,24 @@ object DataAndRemoteTest {
         testSettingsBackupRoundTripAndInvalid()
         testWeatherForecastAndGeocodingParsing()
         testWeatherMonotonicCacheAndBoundedRead()
+        testWeatherOfflineBackoffAndInFlightLock()
         testOnlineWallpaperBingAndWikiParsing()
+        testOnlineWallpaperHostAllowlist()
         testOnlineWallpaperPartialReadPruneAndBackoff()
         testSleepTriggerStateIdempotencyAndFadeCancel()
+        testSleepTimerSmartTickDelay()
         testRootBridgePackageProtection()
         testWebRemoteAuthAndConstantTime()
         testWebRemotePinThrottlingLockoutAndRecovery()
+        testWebRemoteMonotonicLockoutOrigin()
         testWebRemoteRoutingAndValidation()
         testWebRemoteWallpaperUploadSecurity()
         testWallpaperFileHeaderMin64AndMagic()
         testLanWebRemoteServerHardening()
+        testLanWebRemoteServerBoundedPool503()
         testSystemStatusGpuDevfreqDiscovery()
         testSystemStatusThermalZoneDiscovery()
+        testSystemStatusMemInfoEarlyBreak()
 
         println("DataAndRemoteTest: passed=$passed failed=$failed")
         if (failed > 0) System.exit(1)
@@ -580,7 +586,7 @@ object DataAndRemoteTest {
         checkEq("server starts on ephemeral port", true, server.start())
         val port = server.boundPort()
         try {
-            // 1. Security headers + version 3.0.1 on GET /api/ping
+            // 1. Security headers + version 3.0.2 on GET /api/ping
             val pingRaw = rawHttp(port, "GET /api/ping HTTP/1.1\r\nHost: localhost\r\n\r\n")
             check("ping HTTP 200", pingRaw.startsWith("HTTP/1.1 200 OK\r\n"))
             check("header X-Frame-Options: DENY", pingRaw.contains("X-Frame-Options: DENY\r\n"))
@@ -588,7 +594,12 @@ object DataAndRemoteTest {
             check("header X-Content-Type-Options: nosniff", pingRaw.contains("X-Content-Type-Options: nosniff\r\n"))
             check("header Cache-Control: no-store", pingRaw.contains("Cache-Control: no-store\r\n"))
             check("header CSP frame-ancestors none", pingRaw.contains("Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n"))
-            check("ping reports version 3.0.1", pingRaw.contains("\"version\":\"3.0.1\""))
+            check("ping reports version 3.0.2", pingRaw.contains("\"version\":\"3.0.2\""))
+
+            // 1b. Large multi-header request succeeds cleanly with fast buffered read
+            val padHeaders = (1..25).joinToString("") { "X-Pad-$it: ${"v".repeat(120)}\r\n" }
+            val multiHdrRes = rawHttp(port, "GET /api/ping HTTP/1.1\r\nHost: localhost\r\n$padHeaders\r\n")
+            check("multi-header buffered read -> 200 OK", multiHdrRes.startsWith("HTTP/1.1 200 OK\r\n"))
 
             // 2. Clean TCP EOF writes 0 bytes (never 431)
             val eofBytes = java.net.Socket("127.0.0.1", port).use { s ->
@@ -670,6 +681,189 @@ object DataAndRemoteTest {
         }
     }
 
+    private fun testWeatherOfflineBackoffAndInFlightLock() {
+        val cfg = WeatherConfig("Казань", 55.7961, 49.1064)
+        val other = WeatherConfig("Москва", 55.7558, 37.6173)
+        val validJson = """{"current":{"temperature_2m":3.0,"apparent_temperature":1.0,"weather_code":0,"wind_speed_10m":5.0}}"""
+        val origClock = WeatherClient.elapsedClockMs
+        var nowMs = 50_000L
+        try {
+            WeatherClient.elapsedClockMs = { nowMs }
+            WeatherClient.clearCacheForTest()
+
+            var fetchCalls = 0
+            val failRes = WeatherClient.fetchForecastWith(cfg, force = false) { fetchCalls++; null }
+            checkEq("offline weather failure returns null without cache", null, failRes)
+            checkEq("first failure calls fetcher once", 1, fetchCalls)
+            checkEq("failure backoff active immediately", true, WeatherClient.isInFailureBackoff(cfg, nowMs + 1000L))
+            checkEq("isStale false during 15m failure backoff", false, WeatherClient.isStale(cfg, nowMs + 60_000L))
+            checkEq("other city still stale during backoff", true, WeatherClient.isStale(other, nowMs + 60_000L))
+
+            nowMs += 60_000L
+            WeatherClient.fetchForecastWith(cfg, force = false) { fetchCalls++; validJson }
+            checkEq("non-forced retry skipped during backoff", 1, fetchCalls)
+
+            val forcedOk = WeatherClient.fetchForecastWith(cfg, force = true) { fetchCalls++; validJson }
+            check("forced retry bypasses failure backoff", forcedOk != null)
+            checkEq("forced retry called fetcher", 2, fetchCalls)
+            checkEq("success clears failure backoff", false, WeatherClient.isInFailureBackoff(cfg, nowMs + 1000L))
+
+            // Failure backoff expires after FAILURE_BACKOFF_MS
+            WeatherClient.clearCacheForTest()
+            WeatherClient.fetchForecastWith(cfg, force = false) { null }
+            checkEq("stale false before 15m backoff expiry", false, WeatherClient.isStale(cfg, nowMs + WeatherClient.FAILURE_BACKOFF_MS - 1L))
+            checkEq("stale true at 15m backoff expiry", true, WeatherClient.isStale(cfg, nowMs + WeatherClient.FAILURE_BACKOFF_MS))
+
+            // Concurrent in-flight lock deduplicates duplicate calls
+            WeatherClient.clearCacheForTest()
+            val calls = java.util.concurrent.atomic.AtomicInteger(0)
+            val entered = java.util.concurrent.CountDownLatch(1)
+            val release = java.util.concurrent.CountDownLatch(1)
+            val done = java.util.concurrent.CountDownLatch(2)
+            val t1 = Thread {
+                WeatherClient.fetchForecastWith(cfg, force = false) {
+                    calls.incrementAndGet()
+                    entered.countDown()
+                    release.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                    validJson
+                }
+                done.countDown()
+            }
+            val t2 = Thread {
+                entered.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                WeatherClient.fetchForecastWith(cfg, force = false) {
+                    calls.incrementAndGet()
+                    validJson
+                }
+                done.countDown()
+            }
+            t1.start()
+            t2.start()
+            entered.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            Thread.sleep(40L)
+            release.countDown()
+            done.await(3, java.util.concurrent.TimeUnit.SECONDS)
+            checkEq("concurrent fetchLock deduplicates second call", 1, calls.get())
+            WeatherClient.clearCacheForTest()
+        } finally {
+            WeatherClient.elapsedClockMs = origClock
+        }
+    }
+
+    private fun testOnlineWallpaperHostAllowlist() {
+        checkEq("www.bing.com allowed", true, OnlineWallpaperProvider.isAllowedImageHost("https://www.bing.com/th?id=OHR.jpg"))
+        checkEq("cn.bing.com subdomain allowed", true, OnlineWallpaperProvider.isAllowedImageHost("https://cn.bing.com/th?id=a.jpg"))
+        checkEq("apex bing.com allowed", true, OnlineWallpaperProvider.isAllowedImageHost("https://bing.com/th?id=a.jpg"))
+        checkEq("upload.wikimedia.org allowed", true, OnlineWallpaperProvider.isAllowedImageHost("https://upload.wikimedia.org/wikipedia/commons/a.jpg"))
+        checkEq("http bing rejected", false, OnlineWallpaperProvider.isAllowedImageHost("http://www.bing.com/th?id=a.jpg"))
+        checkEq("suffix spoof evil-bing.example.com rejected", false, OnlineWallpaperProvider.isAllowedImageHost("https://evil-bing.example.com/a.jpg"))
+        checkEq("subdomain spoof bing.com.example.com rejected", false, OnlineWallpaperProvider.isAllowedImageHost("https://www.bing.com.example.com/a.jpg"))
+        checkEq("userinfo spoof rejected", false, OnlineWallpaperProvider.isAllowedImageHost("https://www.bing.com@example.com/a.jpg"))
+        checkEq("non-443 port rejected", false, OnlineWallpaperProvider.isAllowedImageHost("https://upload.wikimedia.org:8443/a.jpg"))
+        checkEq("arbitrary https host rejected", false, OnlineWallpaperProvider.isAllowedImageHost("https://example.org/a.jpg"))
+        checkEq("invalid scheme rejected", false, OnlineWallpaperProvider.isAllowedImageHost("javascript:alert(1)"))
+
+        val mixedBing = """{"images":[
+            {"startdate":"20261127","url":"https://example.org/phish.jpg","title":"Evil"},
+            {"startdate":"20261126","url":"/th?id=OHR.Good_1920x1080.jpg","title":"Good"}
+        ]}"""
+        val parsedBing = OnlineWallpaperProvider.parseBingJson(mixedBing)
+        checkEq("parseBingJson filters out evil host", 1, parsedBing.size)
+        checkEq("parseBingJson keeps valid Bing URL", "https://www.bing.com/th?id=OHR.Good_1920x1080.jpg", parsedBing[0].url)
+
+        val mixedWiki = """{"query":{"pages":{
+            "1":{"title":"File:Bad.jpg","imageinfo":[{"thumburl":"https://example.org/bad.jpg"}]},
+            "2":{"title":"File:Good.jpg","imageinfo":[{"thumburl":"https://upload.wikimedia.org/thumb/Good.jpg"}]}
+        }}}"""
+        val parsedWiki = OnlineWallpaperProvider.parseWikimediaJson(mixedWiki)
+        checkEq("parseWikimediaJson filters out non-upload host", 1, parsedWiki.size)
+        checkEq("parseWikimediaJson keeps upload.wikimedia.org", "https://upload.wikimedia.org/thumb/Good.jpg", parsedWiki[0].url)
+    }
+
+    private fun testSleepTimerSmartTickDelay() {
+        checkEq("zero remMs -> 0", 0L, SleepTimerController.nextTickDelayMs(0L))
+        checkEq("90m exact aligns to 60s boundary", 60_050L, SleepTimerController.nextTickDelayMs(5_400_000L))
+        checkEq("2m30s aligns to 30s minute boundary", 30_050L, SleepTimerController.nextTickDelayMs(150_000L))
+        checkEq("60.001s clamps to >=200ms anti-spin", 200L, SleepTimerController.nextTickDelayMs(60_001L))
+        checkEq("60s exact switches to 1s window", 1_025L, SleepTimerController.nextTickDelayMs(60_000L))
+        checkEq("15.5s aligns to 15s warning boundary", 525L, SleepTimerController.nextTickDelayMs(15_500L))
+        checkEq("1s aligns to 1025ms", 1_025L, SleepTimerController.nextTickDelayMs(1_000L))
+    }
+
+    private fun testWebRemoteMonotonicLockoutOrigin() {
+        var nowMs = -5_000_000L
+        val router = LanWebRemoteRouter(FakeBackend(pin = "739104"), clockMs = { nowMs })
+        val bad = LanWebRemoteRouter.HttpRequest("GET", "/api/status", headers = mapOf("X-Auth-Token" to "000000"))
+        val good = LanWebRemoteRouter.HttpRequest("GET", "/api/status", headers = mapOf("X-Auth-Token" to "739104"))
+        repeat(5) { router.route(bad) }
+        checkEq("negative monotonic clock locks out -> 429", 429, router.route(good).status)
+        nowMs += LanWebRemoteRouter.AUTH_LOCKOUT_MS - 1L
+        checkEq("negative monotonic clock still 429 before 15s", 429, router.route(good).status)
+        nowMs += 1L
+        checkEq("negative monotonic clock unlocks at 15s", 200, router.route(good).status)
+        val defaultRouter = LanWebRemoteRouter(FakeBackend(pin = "739104"))
+        repeat(5) { defaultRouter.route(bad) }
+        checkEq("default monotonic clock router locks out -> 429", 429, defaultRouter.route(good).status)
+    }
+
+    private fun testLanWebRemoteServerBoundedPool503() {
+        val backend = FakeBackend(pin = "739104")
+        val router = LanWebRemoteRouter(backend)
+        val server = LanWebRemoteServer(
+            port = 0,
+            router = router,
+            socketTimeoutMs = 1500,
+            headerDeadlineMs = 1500L,
+            bodyDeadlineMs = 1500L,
+            maxWorkers = 1,
+            maxQueue = 1
+        )
+        checkEq("bounded pool server starts", true, server.start())
+        val port = server.boundPort()
+        val holders = ArrayList<java.net.Socket>()
+        try {
+            // Occupy the 1 worker + 1 queue slot with open sockets that send partial headers
+            repeat(2) {
+                val s = java.net.Socket("127.0.0.1", port)
+                s.getOutputStream().write("GET /api/ping HTTP/1.1\r\n".toByteArray(Charsets.ISO_8859_1))
+                s.getOutputStream().flush()
+                holders.add(s)
+                Thread.sleep(40L)
+            }
+            var got503 = ""
+            for (attempt in 0 until 4) {
+                val res = rawHttp(port, "GET /api/ping HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                if (res.startsWith("HTTP/1.1 503 Service Unavailable\r\n")) {
+                    got503 = res
+                    break
+                }
+            }
+            check("overflow request returns 503 Service Unavailable", got503.startsWith("HTTP/1.1 503 Service Unavailable\r\n"))
+            check("503 body has service_unavailable code", got503.contains("\"error\":\"service_unavailable\""))
+        } finally {
+            holders.forEach { try { it.close() } catch (_: Throwable) {} }
+            server.stop()
+        }
+    }
+
+    private fun testSystemStatusMemInfoEarlyBreak() {
+        val tmp = java.nio.file.Files.createTempFile("ambient_meminfo_", ".txt").toFile()
+        try {
+            tmp.writeText(
+                "MemTotal:        4012340 kB\n" +
+                    "MemFree:          512000 kB\n" +
+                    "MemAvailable:    2910400 kB\n" +
+                    "Buffers:           90000 kB\n" +
+                    "Cached:          1200000 kB\n"
+            )
+            val (tot, avail) = SystemStatusHelper.readMemInfoKbFrom(tmp)
+            checkEq("meminfo total parsed", 4_012_340L, tot)
+            checkEq("meminfo available parsed", 2_910_400L, avail)
+        } finally {
+            tmp.delete()
+        }
+    }
+
     private fun readHttpIgnoringReset(inp: java.io.InputStream): String {
         val baos = java.io.ByteArrayOutputStream()
         val buf = ByteArray(1024)
@@ -704,7 +898,7 @@ object DataAndRemoteTest {
             return pin
         }
         override fun htmlShell(): ByteArray = "<html><body>Ambient Home Remote</body></html>".toByteArray()
-        override fun statusJson(): Map<String, Any?> = mapOf("ok" to true, "version" to "3.0.1")
+        override fun statusJson(): Map<String, Any?> = mapOf("ok" to true, "version" to "3.0.2")
         override fun dispatchKeyOrText(keyCode: Int?, text: String?): Pair<Boolean, String> {
             lastKey = keyCode
             lastText = text

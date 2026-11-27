@@ -8,9 +8,9 @@
 
 **Сверхлёгкий лаунчер и Ambient-заставка для Android TV без рекламы, телеметрии, Gradle и AndroidX — чистый Kotlin Canvas, ~25 МБ RAM (PSS) и 0% нагрузки на GPU в простое.**
 
-[Скриншоты](#скриншоты) · [Возможности](#ключевые-возможности-v301) · [Архитектура](#архитектура-и-производительность) · [Без root vs Root-мост](#работа-без-root-vs-опциональный-root-мост) · [Установка](#установка-и-обновления) · [LAN Web-пульт и API](#lan-web-пульт-pwa-и-rest-api) · [Сборка из исходников](#сборка-из-исходников) · [Приватность](#приватность-и-атрибуция-обоев) · [English README](README.en.md)
+[Скриншоты](#скриншоты) · [Возможности](#ключевые-возможности-v302) · [Архитектура](#архитектура-и-производительность) · [Без root vs Root-мост](#работа-без-root-vs-опциональный-root-мост) · [Установка](#установка-и-обновления) · [LAN Web-пульт и API](#lan-web-пульт-pwa-и-rest-api) · [Сборка из исходников](#сборка-из-исходников) · [Приватность](#приватность-и-атрибуция-обоев) · [English README](README.en.md)
 
-> **Язык интерфейса (v3.0.1):** Экранный интерфейс ТВ-лаунчера и встроенного Web-пульта выполнен на **русском языке (`ru`)**. Кодовая база не имеет внешних зависимостей и легко локализуется — PR сообщества с добавлением английского (`res/values/strings.xml`) и других языков приветствуются! См. [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Язык интерфейса (v3.0.2):** Экранный интерфейс ТВ-лаунчера и встроенного Web-пульта выполнен на **русском языке (`ru`)**. Кодовая база не имеет внешних зависимостей и легко локализуется — PR сообщества с добавлением английского (`res/values/strings.xml`) и других языков приветствуются! См. [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -30,7 +30,7 @@
 
 ---
 
-## Ключевые возможности (v3.0.1)
+## Ключевые возможности (v3.0.2)
 
 - **Лаконичный док и сетка приложений:** полупрозрачный док в стиле Apple TV с избранным (`★`), ручной сортировкой, скрытием лишних приложений и полноэкранной сеткой всех приложений (`minSdk=26`, `targetSdk=33`).
 - **4 стиля Ambient-часов с защитой от выгорания:** Тонкий, Кино, Минимал и Аналоговые — с перескоком по 4 углам экрана каждые 15 минут и мягким сдвигом пикселей.
@@ -60,9 +60,9 @@ Ambient Home спроектирован так, чтобы работать мг
 | **Внешние зависимости** | **0** — только чистый Kotlin `2.1.10` + Android SDK (`android.jar` API 34): **0 AndroidX, 0 Jetpack, 0 Compose, 0 Gradle** |
 | **Потребление памяти** | **~25 МБ Total PSS** (`1` Activity, `7` Views, `0` WebViews) |
 | **Нагрузка на GPU в простое** | **0%** — обои, затемнение, ночной янтарный тинт и стеклянные панели запекаются заранее вне UI-потока; нет фоновых анимаций в простое |
-| **Структура кода** | **38 модулей Deslop** — каждый `.kt` файл `< 600` строк (макс. `550`), функции `<= 50` строк, строгий ациклический DAG (`root -> {ui, data, model}`, `0` импортов `data.*` в `ui/`), `0` вызовов HWUI `.recycle()` |
-| **Автотесты** | **591 pure-JVM unit-тест** в 5 наборах + **60 Node VM PWA-проверок** (прогоняются за секунды без эмулятора) |
-| **Релизный APK** | **~3,91 МБ R8-сжатый APK** с подписью `apksigner` v2+v3, выравниванием `zipalign -p 4` и несжатым 4-байтно выровненным `STORED` `classes.dex` (`mod4=0`) для zero-copy ART `mmap` |
+| **Структура кода** | **38 модулей Deslop** — каждый `.kt` файл `< 600` строк (макс. `593`), функции `<= 50` строк, строгий ациклический DAG (`root -> {ui, data, model}`, `0` импортов `data.*` в `ui/`), `0` вызовов HWUI `.recycle()` |
+| **Автотесты** | **645 pure-JVM unit-тестов** в 5 наборах + **60 Node VM PWA-проверок** (прогоняются за секунды без эмулятора) |
+| **Релизный APK** | **~2,99 МБ R8-сжатый APK** (16:9 `1920×1080` WebP-обои) с подписью `apksigner` v2+v3, выравниванием `zipalign -p 4` и несжатым 4-байтно выровненным `STORED` `classes.dex` (`mod4=0`) для zero-copy ART `mmap` |
 
 ---
 
@@ -105,11 +105,11 @@ chmod +x ./scripts/install-tv.sh
 
 ### Вариант 2: Ручная установка через ADB
 
-Скачайте `AmbientHome-3.0.1.apk` из раздела [GitHub Releases](https://github.com/pavelcanton/ambient-home-tv/releases) (см. [примечания к релизу v3.0.1](docs/RELEASE_NOTES_v3.0.1.md)) или [соберите из исходников](#сборка-из-исходников), проверьте контрольную сумму SHA-256 и установите:
+Скачайте `AmbientHome-3.0.2.apk` из раздела [GitHub Releases](https://github.com/pavelcanton/ambient-home-tv/releases) (см. [примечания к релизу v3.0.2](docs/RELEASE_NOTES_v3.0.2.md)) или [соберите из исходников](#сборка-из-исходников), проверьте контрольную сумму SHA-256 и установите:
 
 ```bash
 adb connect 192.168.1.x:5555
-adb install -r AmbientHome-3.0.1.apk
+adb install -r AmbientHome-3.0.2.apk
 adb shell cmd package compile -m speed -f com.will.ambienthome
 ```
 
@@ -145,7 +145,7 @@ adb shell cmd notification allow_listener com.will.ambienthome/com.will.ambienth
 | Метод | Эндпоинт | Авторизация | Описание |
 | --- | --- | :---: | --- |
 | `GET` | `/` | Нет | Встроенный однофайловый Web-пульт PWA (никогда не содержит PIN) |
-| `GET` | `/api/ping` | Нет | Проверка доступности (`{"ok":true,"app":"AmbientHome","version":"3.0.1"}`) |
+| `GET` | `/api/ping` | Нет | Проверка доступности (`{"ok":true,"app":"AmbientHome","version":"3.0.2"}`) |
 | `GET` | `/api/status` | PIN | Телеметрия, ночной режим, таймер сна, погода, приложения, USB-тома, `bridgeAvailable` |
 | `POST` | `/api/launch` | PIN | Запуск приложения: `{"package":"org.example.app"}` |
 | `POST` | `/api/action` | PIN | Действие: `night_toggle`, `night_on`, `night_off`, `night_auto`, `sleep_timer` (`{"action":"sleep_timer","minutes":30}`), `next_wallpaper`, `ambient_now`, `media_play_pause`, `media_next`, `wol`, `wifi_reconnect` |
@@ -204,7 +204,7 @@ chmod +x ./build.sh
 
 Оба скрипта (`build.ps1` и `build.sh`) формируют:
 - `AmbientHome.apk` (проверен `apksigner` v2+v3, `zipalign -c -p 4` и `VerifyDexZip` `STORED mod4=0`)
-- `build/AmbientHome-3.0.1.apk.sha256`
+- `build/AmbientHome-3.0.2.apk.sha256`
 
 ### Релизная подпись (опциональные переменные окружения)
 
@@ -226,16 +226,17 @@ Ambient Home собирает **ноль аналитики, ноль отчёт
 - Исходящие HTTPS-запросы выполняются **исключительно** при явном включении пользователем опциональных функций:
   1. **Виджет погоды (выключен по умолчанию):** обращается к [Open-Meteo](https://open-meteo.com/) для выбранного города не чаще одного раза в 45 минут, пока открыт `HOME`.
   2. **Обои «Фото дня» (выключены по умолчанию):** загружает до 3 ежедневных снимков с Bing `HPImageArchive` (фолбэк: Wikimedia Commons POTD) не чаще одного раза в 12 часов, пока открыт `HOME`.
-- **Встроенные обои (`res/drawable-nodpi/w1..w5.jpg`):** все EXIF-метаданные полностью очищены из ресурсов APK.
-  - `w4.jpg` (Grand Teton Sunrise): C.J. Adams / U.S. National Park Service (Public Domain).
-  - `w5.jpg` (Denali from Wonder Lake): Mary Lewandowski / U.S. National Park Service (Public Domain).
-  - `w1.jpg`, `w2.jpg`, `w3.jpg`: фотографии природы из Wikimedia Commons (CC0 / Public Domain).
+- **Встроенные обои (`res/drawable-nodpi/w1..w5.webp`):** обрезаны до точного `1920×1080` WebP (`q=85`), все EXIF-метаданные полностью очищены из ресурсов APK.
+  - `w4.webp` (Grand Teton Sunrise): C.J. Adams / U.S. National Park Service (Public Domain).
+  - `w5.webp` (Denali from Wonder Lake): Mary Lewandowski / U.S. National Park Service (Public Domain).
+  - `w1.webp`, `w2.webp`, `w3.webp`: фотографии природы из Wikimedia Commons (CC0 / Public Domain).
 
 ---
 
 ## Документация и примечания к релизам
 
 - [English README](README.en.md)
+- [Примечания к релизу v3.0.2](docs/RELEASE_NOTES_v3.0.2.md)
 - [Примечания к релизу v3.0.1](docs/RELEASE_NOTES_v3.0.1.md)
 - [Примечания к релизу v3.0.0](docs/RELEASE_NOTES_v3.0.0.md)
 - [Полевые заметки HK1 RBOX K8 (RK3528)](docs/HK1_RBOX_K8_NOTES.md)
