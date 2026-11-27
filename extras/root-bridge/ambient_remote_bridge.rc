@@ -1,0 +1,11 @@
+# Optional native Android init service for the Ambient Home root remote bridge.
+# Place at /system/etc/init/ambient_remote_bridge.rc (0644 root:root) on rooted Android TV devices
+# that support /system/etc/init/*.rc services, alongside /data/adb/ambient_remote_bridge.sh (0700).
+#
+# Runs outside oneshot boot wrappers so Android init automatically keeps the daemon alive.
+# Reads strictly allowlisted commands from Ambient Home's private 0600 FIFO (0.0% idle CPU).
+service ambient_remote_bridge /system/bin/sh /data/adb/ambient_remote_bridge.sh
+    class late_start
+    user root
+    group root
+    seclabel u:r:su:s0

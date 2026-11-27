@@ -1,0 +1,41 @@
+name: Feature Request
+description: Suggest a new capability, localization, or improvement for Ambient Home
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ambient Home targets ultra-low RAM (~25 MB PSS), 0% idle GPU load, and zero external dependencies (no Gradle/AndroidX). Keep this philosophy in mind when proposing features!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: What living-room or Android TV workflow would this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe how you envision this working with a TV D-pad remote or the LAN Web Remote.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Area
+      options:
+        - Home Screen / Dock / Grid
+        - Ambient Screensaver / Wallpapers / Night Mode
+        - LAN Web Remote / REST API
+        - Localization / i18n
+        - Build / Packaging / Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered (optional)
+      description: Any workarounds or alternative designs you considered.

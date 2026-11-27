@@ -1,0 +1,29 @@
+# Build outputs and caches
+build/
+*.apk
+*.aab
+*.idsig
+*.sha256
+
+# Local portable toolchain (downloaded by fetch-toolchain.ps1 / CI)
+tools/
+
+# Signing secrets — NEVER commit keystores or signing properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+keystore.properties
+signing.env
+
+# Logs, temporary files, and editor/OS artifacts
+*.log
+*.tmp
+*.part
+*.bak
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/

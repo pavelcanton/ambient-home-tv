@@ -1,0 +1,205 @@
+name: CI — Build, Test & Deslop Gate
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-verify:
+    name: Pure Kotlin Build, JVM Tests & Deslop Checks
+    runs-on: ubuntu-latest
+    env:
+      TOOLCHAIN_DIR: ${{ github.workspace }}/.ci-toolchain
+      KOTLIN_VER: "2.1.10"
+      KOTLIN_SHA256: "c6e9e2636889828e19c8811d5ab890862538c89dc2a3101956dfee3c2a8ba6b1"
+      BUILD_TOOLS_SHA256: "e858c4b60069d0431051b225d384413b1643e1289b00a4825aed347f25bd510f"
+      PLATFORM_SHA256: "16fdb74c55e59ae3ef52def135aec713508467bd56d7dabcd8c9be31fa8b20f3"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache pinned standalone toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: .ci-toolchain
+          key: ambient-toolchain-linux-kt-${{ env.KOTLIN_VER }}-bt-r34-api34-r03-v1
+
+      - name: Download & SHA-256 verify pinned toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$TOOLCHAIN_DIR/dl"
+
+          fetch_and_extract() {
+            local name="$1"
+            local url="$2"
+            local expected_sha="$3"
+            local target="$4"
+            local archive="$TOOLCHAIN_DIR/dl/$name"
+            local tmpdir="$TOOLCHAIN_DIR/tmp_${name%.zip}"
+
+            curl -fsSL --proto '=https' --tlsv1.2 --retry 3 "$url" -o "$archive"
+            printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum -c -
+
+            rm -rf "$tmpdir" "$target"
+            mkdir -p "$tmpdir"
+            unzip -q "$archive" -d "$tmpdir"
+            local inner
+            inner="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+            if [ -z "$inner" ]; then
+              echo "Unexpected archive layout in $name" >&2
+              exit 1
+            fi
+            mv "$inner" "$target"
+            rm -rf "$tmpdir" "$archive"
+          }
+
+          fetch_and_extract \
+            "kotlin-compiler-${KOTLIN_VER}.zip" \
+            "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VER}/kotlin-compiler-${KOTLIN_VER}.zip" \
+            "$KOTLIN_SHA256" \
+            "$TOOLCHAIN_DIR/kotlinc"
+
+          fetch_and_extract \
+            "build-tools_r34-linux.zip" \
+            "https://dl.google.com/android/repository/build-tools_r34-linux.zip" \
+            "$BUILD_TOOLS_SHA256" \
+            "$TOOLCHAIN_DIR/build-tools"
+
+          fetch_and_extract \
+            "platform-34-ext7_r03.zip" \
+            "https://dl.google.com/android/repository/platform-34-ext7_r03.zip" \
+            "$PLATFORM_SHA256" \
+            "$TOOLCHAIN_DIR/platform"
+
+          rm -rf "$TOOLCHAIN_DIR/dl"
+          chmod +x "$TOOLCHAIN_DIR/build-tools/aapt2" \
+                   "$TOOLCHAIN_DIR/build-tools/zipalign" \
+                   "$TOOLCHAIN_DIR/build-tools/apksigner"
+
+      - name: Deslop, DAG, HWUI & Encoding Hygiene Checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n ./build.sh
+          sh -n ./scripts/install-tv.sh
+          sh -n ./extras/root-bridge/ambient_remote_bridge.sh
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          root = pathlib.Path(".")
+          errors = []
+
+          def strip_kt_comments(src: str) -> str:
+              no_block = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+              return re.sub(r"//.*", "", no_block)
+
+          # 1. Deslop line cap (< 600L), zero data.* in ui/, zero EnumMap in src/ code
+          kt_files = sorted(root.glob("src/**/*.kt"))
+          if not kt_files:
+              errors.append("No Kotlin source files found under src/")
+          for p in kt_files:
+              raw = p.read_bytes()
+              if raw.startswith(b"\xef\xbb\xbf"):
+                  errors.append(f"UTF-8 BOM forbidden: {p}")
+              if b"\r" in raw:
+                  errors.append(f"CRLF forbidden: {p}")
+              text = raw.decode("utf-8")
+              code = strip_kt_comments(text)
+              lines = text.splitlines()
+              if len(lines) >= 600:
+                  errors.append(f"Deslop line budget exceeded ({len(lines)} >= 600): {p}")
+              if "/ui/" in p.as_posix() and re.search(r"^\s*import\s+com\.will\.ambienthome\.data\.", code, re.M):
+                  errors.append(f"DAG violation (data.* imported in ui/): {p}")
+              if re.search(r"\bEnumMap\b", code):
+                  errors.append(f"EnumMap forbidden for R8 stability: {p}")
+
+          # 2. Zero HWUI Bitmap.recycle() in hardware-rendered UI views/caches
+          hwui_ui_files = [
+              "src/com/will/ambienthome/ui/HomeCanvasView.kt",
+              "src/com/will/ambienthome/ui/HomeRenderer.kt",
+              "src/com/will/ambienthome/ui/TopBarRenderer.kt",
+              "src/com/will/ambienthome/ui/HomeSurfaceCache.kt",
+          ]
+          for rel in hwui_ui_files:
+              p = root / rel
+              if p.is_file() and ".recycle()" in strip_kt_comments(p.read_text("utf-8")):
+                  errors.append(f"HWUI .recycle() forbidden: {rel}")
+          app_repo = root / "src/com/will/ambienthome/data/AppRepository.kt"
+          if app_repo.is_file():
+              app_code = strip_kt_comments(app_repo.read_text("utf-8"))
+              if re.search(r"(?:tileCache|tileBitmap|\.bitmap)\b[^\n;]*\.recycle\(\)", app_code):
+                  errors.append("HWUI tileCache/tileBitmap .recycle() forbidden in AppRepository.kt")
+
+          # 3. UTF-8 NO BOM + LF on text/config/docs/shell files
+          no_bom_globs = [
+              "test/**/*.kt", "res/**/*.xml", "res/**/*.html",
+              "*.md", "docs/**/*.md", "extras/**/*.md", ".github/**/*.yml",
+              "build.sh", "scripts/**/*.sh", "extras/**/*.sh", "extras/**/*.rc",
+              "AndroidManifest.xml", "proguard-rules.pro",
+              "LICENSE", ".gitignore",
+          ]
+          for pattern in no_bom_globs:
+              for p in sorted(root.glob(pattern)):
+                  if not p.is_file():
+                      continue
+                  raw = p.read_bytes()
+                  if raw.startswith(b"\xef\xbb\xbf"):
+                      errors.append(f"UTF-8 BOM forbidden: {p}")
+                  if b"\r" in raw:
+                      errors.append(f"CRLF forbidden: {p}")
+
+          # 4. UTF-8 WITH BOM + LF on PowerShell scripts
+          for p in sorted(list(root.glob("*.ps1")) + list(root.glob("scripts/**/*.ps1"))):
+              raw = p.read_bytes()
+              if not raw.startswith(b"\xef\xbb\xbf"):
+                  errors.append(f"PowerShell script missing UTF-8 BOM: {p}")
+              if b"\r" in raw:
+                  errors.append(f"PowerShell script has CRLF: {p}")
+
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              sys.exit(1)
+
+          print(f"Deslop & hygiene checks PASS ({len(kt_files)} Kotlin source files verified).")
+          PY
+
+      - name: Run JVM Unit Tests & Build R8 APK (./build.sh)
+        shell: bash
+        env:
+          AMBIENT_TOOLCHAIN_ROOT: ${{ env.TOOLCHAIN_DIR }}
+        run: |
+          set -euo pipefail
+          chmod +x ./build.sh
+          ./build.sh
+          ls -lh AmbientHome.apk build/AmbientHome-*.apk.sha256
+          cat build/AmbientHome-*.apk.sha256
+
+      - name: Upload APK & SHA-256 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmbientHome-ci-apk
+          path: |
+            AmbientHome.apk
+            build/AmbientHome-*.apk.sha256
+          retention-days: 14
+          if-no-files-found: error

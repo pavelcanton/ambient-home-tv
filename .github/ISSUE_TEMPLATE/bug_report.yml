@@ -1,0 +1,58 @@
+name: Bug Report
+description: Report a crash, rendering glitch, or unexpected behavior in Ambient Home
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue! Please strip any personal IP addresses, Wi-Fi SSIDs, MAC addresses, or Web Remote PINs before pasting logs.
+  - type: input
+    id: version
+    attributes:
+      label: Ambient Home Version
+      description: Shown at the top of Ambient Home Settings (e.g. 3.0.0, versionCode 18).
+      placeholder: "3.0.0"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: TV Box / Device Model & Android Version
+      description: Device model, SoC (if known), Android TV / AOSP API version, and screen resolution.
+      placeholder: "e.g. Nvidia Shield TV 2019 / Generic Amlogic S905X4, Android 11, 1920x1080"
+    validations:
+      required: true
+  - type: dropdown
+    id: root_mode
+    attributes:
+      label: Environment Mode
+      options:
+        - Unrooted stock Android TV
+        - Rooted without remote.fifo bridge
+        - Rooted with optional remote.fifo bridge
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Open Settings -> ...
+        2. Press D-pad OK on ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logcat Output (optional)
+      description: Output of `adb logcat -d -s AmbientHome AndroidRuntime` (remove personal IPs/SSIDs first).
+      render: shell
