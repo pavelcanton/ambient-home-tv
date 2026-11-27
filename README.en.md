@@ -16,17 +16,21 @@
 
 ## Screenshots
 
-| Apple TV-style Dock | Night Cinema Mode (Zero-Shader Amber Tint) |
+| Apple TV-style Dock (v3.0.2 WebP Wallpapers) | Full-Screen All Apps Grid (6×3) |
 | :---: | :---: |
-| ![Ambient Home Dock](docs/screenshots/dock.png) | ![Night Cinema Mode](docs/screenshots/night_cinema.png) |
+| ![Ambient Home 3.0.2 Dock](docs/screenshots/dock.png) | ![All Apps Grid](docs/screenshots/grid_all16.png) |
 
-| Ambient Analog Clock (Burn-in Safe 4-Corner Hop) | Living-Room Sleep Timer Badge |
+| Ambient Screensaver (Thin Clock, `Graphics: 0 KB`) | Night Cinema + Analog Clock + Weather + Sleep Timer |
 | :---: | :---: |
-| ![Ambient Analog Screensaver](docs/screenshots/ambient_analog.png) | ![Sleep Timer Active](docs/screenshots/sleep_timer.png) |
+| ![Ambient Thin Screensaver](docs/screenshots/ambient_thin.png) | ![Ambient Analog Night Cinema with Weather and Sleep](docs/screenshots/analog_night_sleep.png) |
 
-| Settings & Live Hardware Diagnostics |
-| :---: |
-| ![Ambient Home Settings](docs/screenshots/settings.png) |
+| Open-Meteo Weather Forecast (24h & 3-Day) | Live Now Playing Pill (`MediaSession`) |
+| :---: | :---: |
+| ![Open-Meteo Weather Forecast](docs/screenshots/weather_forecast.png) | ![Live Now Playing Pill](docs/screenshots/now_playing.png) |
+
+| Settings v3.0.2 & Live Hardware Diagnostics | Embedded LAN Web Remote (PWA, WCAG 2.2 AA) |
+| :---: | :---: |
+| ![Ambient Home 3.0.2 Settings](docs/screenshots/settings.png) | ![LAN Web Remote PWA 3.0.2](docs/screenshots/web_remote.png) |
 
 ---
 

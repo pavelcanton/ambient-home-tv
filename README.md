@@ -16,17 +16,21 @@
 
 ## Скриншоты
 
-| Док в стиле Apple TV | Ночной кино-режим (тёплый янтарный тинт без шейдеров) |
+| Док в стиле Apple TV (WebP-обои v3.0.2) | Сетка всех приложений (6×3) |
 | :---: | :---: |
-| ![Док Ambient Home](docs/screenshots/dock.png) | ![Ночной кино-режим](docs/screenshots/night_cinema.png) |
+| ![Док Ambient Home 3.0.2](docs/screenshots/dock.png) | ![Сетка всех приложений](docs/screenshots/grid_all16.png) |
 
-| Аналоговые Ambient-часы (защита от выгорания по 4 углам) | Индикатор таймера сна |
+| Ambient-заставка (стиль «Тонкий», `Graphics: 0 KB`) | Ночной кино-режим + Аналоговые часы + Погода + Таймер сна |
 | :---: | :---: |
-| ![Аналоговая Ambient-заставка](docs/screenshots/ambient_analog.png) | ![Активный таймер сна](docs/screenshots/sleep_timer.png) |
+| ![Ambient-заставка Тонкий](docs/screenshots/ambient_thin.png) | ![Аналоговая Ambient-заставка с погодой и сном](docs/screenshots/analog_night_sleep.png) |
 
-| Настройки и живая диагностика железа |
-| :---: |
-| ![Настройки Ambient Home](docs/screenshots/settings.png) |
+| Прогноз погоды Open-Meteo (24 ч и 3 дня) | Пилюля «Сейчас играет» (`MediaSession`) |
+| :---: | :---: |
+| ![Прогноз погоды Open-Meteo](docs/screenshots/weather_forecast.png) | ![Пилюля Сейчас играет](docs/screenshots/now_playing.png) |
+
+| Настройки 3.0.2 и живая диагностика железа | Встроенный LAN Web-пульт (PWA, WCAG 2.2 AA) |
+| :---: | :---: |
+| ![Настройки Ambient Home 3.0.2](docs/screenshots/settings.png) | ![LAN Web-пульт Ambient Home 3.0.2](docs/screenshots/web_remote.png) |
 
 ---
 
