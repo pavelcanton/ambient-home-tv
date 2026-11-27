@@ -1,42 +1,42 @@
 # Ambient Home 3.0.0 (`versionCode=18`)
 
-First public open-source release of **Ambient Home** — an ultra-lightweight, ad-free, zero-telemetry Android TV launcher & living-room ambient display written in pure Kotlin (`0` Gradle, `0` AndroidX, `~25 MB` RAM, `0%` idle GPU).
+Первый публичный open-source релиз **Ambient Home** — сверхлёгкого лаунчера и Ambient-заставки для Android TV без рекламы и телеметрии, написанного на чистом Kotlin (`0` Gradle, `0` AndroidX, `~25 МБ` RAM, `0%` GPU в простое).
 
-> **Battle-Tested 24/7 on HK1 RBOX K8 (Rockchip RK3528):** Continuously soak-tested on **HK1 RBOX K8** (`RK3528`, `4x Cortex-A53`, `Mali-450 MP`, `4 GB RAM`, `Android 13 / API 33`) at **~25.1 MB Total PSS**, **0% idle GPU**, **0 crashes**, and **0 Accessibility lag** — while working **100% unrooted** on any Android TV / Google TV device (`minSdk=26`, `targetSdk=33`).
+> **Проверено 24/7 на HK1 RBOX K8 (Rockchip RK3528):** непрерывные тесты на **HK1 RBOX K8** (`RK3528`, `4× Cortex-A53`, `Mali-450 MP`, `4 ГБ RAM`, `Android 13 / API 33`) подтвердили **~25,1 МБ Total PSS**, **0% нагрузки на GPU в простое**, **0 падений** и **0 лагов Accessibility** — при **100% работе без root** на любом Android TV / Google TV (`minSdk=26`, `targetSdk=33`).
 
-> **Localization Note:** Current TV and Web Remote UI strings in v3.0.0 are **Russian-first (`ru`)**. Community PRs adding English (`res/values/strings.xml`) and other translations are very welcome.
-
----
-
-## Highlights
-
-- **Apple TV-Style Dock & All Apps Grid:** Pinned favorites (`★`), manual dock reordering, app hiding, instant D-pad response, and pre-baked translucent panels.
-- **Auto-Night Cinema Mode:** Configurable schedule (default `22:00-07:00`) + Auto/On/Off toggle; bakes warm amber tint and extra dimming directly into static `RGB_565` wallpapers off the UI thread (`0%` extra GPU load) and lowers clock luminance.
-- **4 Burn-in-Safe Ambient Clocks:** Thin, Cinema, Minimal, and Analog styles with 15-minute 4-corner burn-in hop and subtle pixel drift.
-- **Quick Control Sheet:** One-click living-room menu (TopBar Quick icon or `MENU` key) for Ambient Now, Next Wallpaper, Night Cinema toggle, Sleep Timer, LAN Web Remote info (URL + PIN), Soft Wi-Fi Reconnect, and Safe USB Eject.
-- **Living-Room Sleep Timer:** 15 / 30 / 60 / 90-minute countdown badge, 15-second cancelable pre-sleep warning, smooth volume fade-out + media pause, and transition to ultra-dim black Night Ambient (plus optional hardware HDMI sleep when paired with the root bridge).
-- **Smart Living-Room Widgets & Utilities:**
-  - **Open-Meteo Weather** (optional, API-key-free, RAM-only cache, refreshes at most every 45 min while `HOME` is open).
-  - **Now Playing Pill** (optional zero-idle-cost media bar via `NotificationListener` ADB grant).
-  - **Photo of the Day Wallpapers** (optional Bing `HPImageArchive` + Wikimedia Commons POTD rotation, max 3 validated JPEGs, offline fallback) plus 5 metadata-stripped bundled nature photos, custom `/sdcard/Pictures/Wallpapers`, and gradients.
-  - **Zero-Scan Bluetooth Audio Badge** (passive `AudioDeviceCallback`, `0` BT scans).
-  - **Wake-on-LAN PC Tile**, **Wi-Fi-Aware Cold-Boot Auto-Launch**, and **Human-Readable JSON Settings Backup/Restore**.
-- **Embedded LAN Web Remote PWA & REST API (`:8765`):** Control your TV from any phone/PC browser on your home LAN (`http://<TV_IP>:8765`), protected by a random 6-digit `SecureRandom` PIN (`X-Auth-Token`, constant-time verification, 5-failure 15s `429` lockout). Supports MacroDroid / Home Assistant / `curl` automation and can be toggled completely Off in Settings.
-- **Cross-Platform Standalone Build:** Pure Kotlin `2.1.10` + R8 builds via Windows `fetch-toolchain.ps1` + `build.ps1` or Linux/macOS `./build.sh` with optional release signing (`AMBIENT_KEYSTORE*`), verified by **491/491** pure-JVM unit tests.
+> **Язык интерфейса:** в v3.0.0 экранный интерфейс ТВ и Web-пульта выполнен на **русском языке (`ru`)**. PR сообщества с английским (`res/values/strings.xml`) и другими переводами приветствуются.
 
 ---
 
-## Unrooted Stock Android TV vs Optional Root Bridge
+## Что нового и ключевые возможности
 
-Ambient Home requires **zero root** on stock Android TV / Google TV boxes:
-- **Works unrooted:** Dock/Grid launcher, Wallpapers, Night Cinema Mode, Ambient Clocks, Sleep Timer (volume fade + media pause + black Night Ambient), Weather, BT Audio badge, Now Playing pill (via ADB `NotificationListener` grant), WoL, Cold-Boot Auto-Launch, JSON Backup/Restore, and LAN Web Remote (Live Telemetry, App Launcher, Night Mode, Sleep Timer, Weather/WoL config, Wallpaper Upload).
-- **Optional Root Bridge (`extras/root-bridge/`):** On rooted Android TV devices (including RK3528 / HK1 RBOX K8), installing the optional allowlisted FIFO bridge (`files/remote.fifo`) additionally enables system-wide D-pad keys, UTF-8 Clipboard Paste, Force-Stop, AFR display-mode switching, Safe USB Eject, and hardware HDMI sleep (`KEYCODE_SLEEP`). See `extras/root-bridge/README.md` and `docs/HK1_RBOX_K8_NOTES.md`.
+- **Док в стиле Apple TV и сетка всех приложений:** закреплённое избранное (`★`), ручной порядок иконок в доке, скрытие приложений, мгновенный отклик на D-pad и заранее запечённые полупрозрачные панели.
+- **Авто-ночной кино-режим:** настраиваемое расписание (по умолчанию `22:00–07:00`) + режимы Авто / Вкл / Выкл; тёплый янтарный оттенок и дополнительное затемнение запекаются в статичные `RGB_565` обои вне UI-потока (`0%` нагрузки на GPU), одновременно снижается яркость часов.
+- **4 стиля Ambient-часов с защитой от выгорания:** Тонкий, Кино, Минимал и Аналоговые с перескоком по 4 углам раз в 15 минут и мягким сдвигом пикселей.
+- **Панель быстрых действий:** меню в один клик (кнопка на верхней панели или клавиша `MENU`) — Ambient сейчас, следующие обои, ночной кино-режим, таймер сна, карточка LAN Web-пульта (URL + PIN), мягкий переподъём Wi-Fi и безопасное извлечение USB.
+- **Таймер сна для гостиной:** отсчёт 15 / 30 / 60 / 90 минут, отменяемое предупреждение за 15 секунд до сна, плавное снижение громкости + пауза медиа и переход в сверхтёмный чёрный ночной Ambient (плюс опциональный аппаратный сон HDMI через root-мост).
+- **Умные виджеты и утилиты:**
+  - **Погода Open-Meteo** (опционально, без API-ключей, кэш только в RAM, обновление не чаще раза в 45 мин при открытом `HOME`).
+  - **Пилюля «Сейчас играет»** (опциональная строка медиа с нулевой нагрузкой в простое через разрешение `NotificationListener` по ADB).
+  - **Обои «Фото дня»** (опциональная ротация Bing `HPImageArchive` + Wikimedia Commons POTD, максимум 3 проверенных JPEG, оффлайн-фолбэк) + 5 встроенных пейзажей без EXIF, свои обои из `/sdcard/Pictures/Wallpapers` и градиенты.
+  - **Индикатор Bluetooth-аудио без сканирования** (пассивный `AudioDeviceCallback`, `0` BT-сканирований).
+  - **Плитка Wake-on-LAN**, **автозапуск после холодного старта с ожиданием Wi-Fi** и **читаемый JSON-бэкап/восстановление настроек**.
+- **Встроенный LAN Web-пульт PWA и REST API (`:8765`):** управление ТВ с любого телефона/ПК в локальной сети (`http://<TV_IP>:8765`), защита случайным 6-значным `SecureRandom` PIN (`X-Auth-Token`, сравнение за постоянное время, блокировка `429` на 15 с после 5 ошибок). Поддерживает автоматизацию MacroDroid / Home Assistant / `curl` и полностью отключается в Настройках.
+- **Кроссплатформенная сборка без Gradle:** чистый Kotlin `2.1.10` + R8 через Windows `fetch-toolchain.ps1` + `build.ps1` или Linux/macOS `./build.sh` с опциональной релизной подписью (`AMBIENT_KEYSTORE*`), подтверждённые **491/491** pure-JVM unit-тестами.
 
 ---
 
-## Installation
+## Обычный Android TV (без root) vs опциональный Root-мост
 
-### Quick-Install Script (Recommended)
+Ambient Home **не требует root** на обычных Android TV / Google TV приставках:
+- **Работает без root:** док и сетка приложений, обои, ночной кино-режим, Ambient-часы, таймер сна (затухание громкости + пауза медиа + чёрный ночной Ambient), погода, индикатор BT-аудио, пилюля «Сейчас играет» (через ADB `NotificationListener`), WoL, автозапуск после холодного старта, JSON-бэкап и LAN Web-пульт (телеметрия, запуск приложений, ночной режим, таймер сна, настройки погоды/WoL, загрузка обоев).
+- **Опциональный Root-мост (`extras/root-bridge/`):** на рутированных Android TV приставках (включая RK3528 / HK1 RBOX K8) установка опционального FIFO-моста (`files/remote.fifo`) дополнительно открывает системные клавиши D-pad, вставку UTF-8 из буфера обмена, Force-Stop, переключение частоты AFR, безопасное извлечение USB и аппаратный сон HDMI (`KEYCODE_SLEEP`). Подробнее в `extras/root-bridge/README.md` и `docs/HK1_RBOX_K8_NOTES.md`.
+
+---
+
+## Установка и автообновление
+
+### Скрипт быстрой установки (рекомендуется)
 
 **Windows (PowerShell):**
 
@@ -51,30 +51,44 @@ chmod +x ./scripts/install-tv.sh
 ./scripts/install-tv.sh --device <TV_IP>:5555 --now-playing --set-home
 ```
 
-### Manual ADB Install
+### Ручная установка через ADB
 
 ```bash
 adb connect <TV_IP>:5555
 adb install -r AmbientHome-3.0.0.apk
 adb shell cmd package compile -m speed -f com.will.ambienthome
 adb shell cmd package set-home-activity com.will.ambienthome/.MainActivity
-# Optional: enable Now Playing pill (survives reboots)
+# Опционально: включить пилюлю «Сейчас играет» (сохраняется после перезагрузки)
 adb shell cmd notification allow_listener com.will.ambienthome/com.will.ambienthome.data.AmbientNotificationListener
 ```
 
+### Автообновление через Open Shelf / Obtainium
+
+Релиз подписан постоянным релизным сертификатом (`CN=Ambient Home, O=pavelcanton`), поэтому **Open Shelf** и **Obtainium** могут автоматически обновлять приложение напрямую из `https://github.com/pavelcanton/ambient-home-tv/releases` без переустановки и потери настроек.
+
 ---
 
-## Build Verification & Checksums
+## Проверка сборки и контрольные суммы
 
-| Artifact | Value |
+| Артефакт | Значение |
 | --- | --- |
-| **Version** | `3.0.0` (`versionCode=18`, `minSdk=26`, `targetSdk=33`) |
-| **Release Asset** | `AmbientHome-3.0.0.apk` (+ `AmbientHome-3.0.0.apk.sha256`) |
-| **Release APK Size** | `4,084,695` bytes (`3.90 MB`) |
-| **Release APK SHA-256** | `96610aebe504cb424bc435d534aec784860918758c35686cc94b5cdb8e63ecc5` |
-| **R8 `classes.dex`** | `346,556` bytes (`STORED`, 4-byte aligned `mod4=0`, SHA-256 `43d69ab04d81792e550349ab82d6b96dd7d8f5b4831ad346fb7dc19281bbf3c6`) |
-| **JVM Unit Tests** | `491 / 491` PASS (`0` FAIL across 5 suites) |
-| **Signing Certificate** | `CN=Ambient Home, O=pavelcanton` (RSA 4096-bit, `apksigner` v2+v3, v4 disabled) |
-| **Signing Cert SHA-256** | `0011e394417345dcc87a9fdafee389db81cbf799b6aadbe9b9e372f4597ec74c` |
+| **Версия** | `3.0.0` (`versionCode=18`, `minSdk=26`, `targetSdk=33`) |
+| **Файлы релиза** | `AmbientHome-3.0.0.apk` (+ `AmbientHome-3.0.0.apk.sha256`) |
+| **Размер релизного APK** | `4,084,695` байт (`3.90 MB`) |
+| **SHA-256 релизного APK** | `96610aebe504cb424bc435d534aec784860918758c35686cc94b5cdb8e63ecc5` |
+| **R8 `classes.dex`** | `346,556` байт (`STORED`, 4-байтное выравнивание `mod4=0`, SHA-256 `43d69ab04d81792e550349ab82d6b96dd7d8f5b4831ad346fb7dc19281bbf3c6`) |
+| **JVM Unit-тесты** | `491 / 491` PASS (`0` FAIL в 5 наборах) |
+| **Сертификат подписи** | `CN=Ambient Home, O=pavelcanton` (RSA 4096-bit, `apksigner` v2+v3, v4 отключён) |
+| **SHA-256 сертификата** | `0011e394417345dcc87a9fdafee389db81cbf799b6aadbe9b9e372f4597ec74c` |
 
-> **Verify Before Installing:** Check `sha256sum -c AmbientHome-3.0.0.apk.sha256` (Linux/macOS) or `(Get-FileHash AmbientHome-3.0.0.apk -Algorithm SHA256).Hash` (Windows) against `96610aebe504cb424bc435d534aec784860918758c35686cc94b5cdb8e63ecc5`, and verify the release signature (`CN=Ambient Home, O=pavelcanton`, cert SHA-256 `0011e394417345dcc87a9fdafee389db81cbf799b6aadbe9b9e372f4597ec74c`).
+> **Проверка перед установкой:** сверьте `sha256sum -c AmbientHome-3.0.0.apk.sha256` (Linux/macOS) или `(Get-FileHash AmbientHome-3.0.0.apk -Algorithm SHA256).Hash` (Windows) с `96610aebe504cb424bc435d534aec784860918758c35686cc94b5cdb8e63ecc5`, а также подпись сертификата (`CN=Ambient Home, O=pavelcanton`, SHA-256 `0011e394417345dcc87a9fdafee389db81cbf799b6aadbe9b9e372f4597ec74c`).
+
+---
+
+## English Summary
+
+**Ambient Home 3.0.0 (`versionCode=18`)** is the first public open-source release of our ultra-lightweight, ad-free, zero-telemetry Android TV launcher & living-room ambient display written in pure Kotlin (`0` Gradle, `0` AndroidX, `~25 MB` RAM, `0%` idle GPU).
+
+- **Works 100% unrooted** on Android TV / Google TV (`minSdk=26`, `targetSdk=33`), soak-tested 24/7 on HK1 RBOX K8 (RK3528, Android 13), with an optional root FIFO bridge (`extras/root-bridge/`) for system-wide D-pad, paste, force-stop, AFR, USB eject, and hardware HDMI sleep.
+- **Features:** Apple TV-style dock & grid, 4 burn-in-safe Ambient clocks (4-corner hop), Auto-Night Cinema warm amber mode (`0%` extra GPU), Quick Control Sheet, Living-Room Sleep Timer, zero-scan BT audio badge, Open-Meteo Weather, Now Playing pill, Photo of the Day wallpapers, Wake-on-LAN, cold-boot auto-launch, JSON settings backup/restore, and PIN-protected LAN Web Remote PWA & REST API (`:8765`). UI is currently **Russian-first (`ru`)**; English documentation is in [README.en.md](https://github.com/pavelcanton/ambient-home-tv/blob/main/README.en.md).
+- **Verified Official Release Build:** `AmbientHome-3.0.0.apk` (`4,084,695` bytes / `3.90 MB`), SHA-256 `96610aebe504cb424bc435d534aec784860918758c35686cc94b5cdb8e63ecc5`, R8 `classes.dex` `346,556` bytes (`STORED mod4=0`), `491/491` JVM unit tests PASS, signed with permanent RSA-4096 certificate `CN=Ambient Home, O=pavelcanton` (`apksigner` v2+v3, cert SHA-256 `0011e394417345dcc87a9fdafee389db81cbf799b6aadbe9b9e372f4597ec74c`, Open Shelf / Obtainium auto-update ready).
