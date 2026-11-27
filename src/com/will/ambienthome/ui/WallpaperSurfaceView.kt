@@ -72,7 +72,7 @@ class WallpaperSurfaceView(context: Context) : SurfaceView(context), SurfaceHold
     ) {
         val changed = ambientActive != active ||
             overlay != overlayData ||
-            (active && (ambientTime != time || ambientDate != date || ambientTick != tickCount))
+            (active && overlayData.showClock && (ambientTime != time || ambientDate != date || ambientTick != tickCount))
         ambientActive = active
         ambientTime = time
         ambientDate = date
@@ -108,7 +108,7 @@ class WallpaperSurfaceView(context: Context) : SurfaceView(context), SurfaceHold
         } ?: return
         try {
             drawBackground(canvas)
-            if (ambientActive && ambientTime.isNotEmpty()) {
+            if (ambientActive && overlay.showClock && ambientTime.isNotEmpty()) {
                 clockRenderer.draw(canvas, ambientTime, ambientDate, ambientTick, overlay)
             }
         } finally {

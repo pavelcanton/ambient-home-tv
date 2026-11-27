@@ -43,69 +43,79 @@ class LauncherStore private constructor(
     private val dirtyWpIndices = BooleanArray(WallpaperSource.entries.size)
 
     init {
-        migrateLegacyIfNeeded(legacySpProvider)
-        cleanupOrphanKeys()
-        readWallpaperIndices(readActiveWallpaperSource())
+        synchronized(STORE_LOCK) {
+            migrateLegacyIfNeeded(legacySpProvider)
+            cleanupOrphanKeys()
+            readWallpaperIndices(readActiveWallpaperSource())
+        }
     }
 
-    fun readState(): LauncherState = LauncherState(
-        appearance = readAppearance(),
-        layout = readLayout(),
-        features = readFeatures()
-    )
+    fun readState(): LauncherState = synchronized(STORE_LOCK) {
+        LauncherState(
+            appearance = readAppearance(),
+            layout = readLayout(),
+            features = readFeatures()
+        )
+    }
 
-    fun updateAppearance(transform: (AppearanceState) -> AppearanceState): LauncherState {
+    fun updateAppearance(transform: (AppearanceState) -> AppearanceState): LauncherState = synchronized(STORE_LOCK) {
         val current = readAppearance()
         val updated = normalizeAppearance(transform(current))
         writeAppearance(updated)
-        return readState()
+        LauncherState(appearance = readAppearance(), layout = readLayout(), features = readFeatures())
     }
 
-    fun updateAppsLayout(transform: (AppsLayoutState) -> AppsLayoutState): LauncherState {
+    fun updateAppsLayout(transform: (AppsLayoutState) -> AppsLayoutState): LauncherState = synchronized(STORE_LOCK) {
         val current = readLayout()
         val updated = normalizeLayout(transform(current))
         writeLayout(updated)
-        return LauncherState(appearance = readAppearance(), layout = updated, features = readFeatures())
+        LauncherState(appearance = readAppearance(), layout = updated, features = readFeatures())
     }
 
-    fun updateFeatures(transform: (FeatureState) -> FeatureState): LauncherState {
+    fun updateFeatures(transform: (FeatureState) -> FeatureState): LauncherState = synchronized(STORE_LOCK) {
         val current = readFeatures()
         val updated = normalizeFeatures(transform(current))
         writeFeatures(updated)
-        return LauncherState(appearance = readAppearance(), layout = readLayout(), features = updated)
+        LauncherState(appearance = readAppearance(), layout = readLayout(), features = updated)
     }
 
-    fun wallpaperIndexFor(source: WallpaperSource): Int = ramWpIndices[source.ordinal]
+    fun wallpaperIndexFor(source: WallpaperSource): Int = synchronized(STORE_LOCK) {
+        ramWpIndices[source.ordinal]
+    }
 
     fun recordWallpaperIndex(source: WallpaperSource, index: Int, persistImmediately: Boolean) {
-        val safe = index.coerceAtLeast(0)
-        val ord = source.ordinal
-        ramWpIndices[ord] = safe
-        if (persistImmediately) {
-            if (persistedWpIndices[ord] != safe) {
-                sp.edit().putInt(wpIndexKey(source), safe).apply()
-                persistedWpIndices[ord] = safe
+        synchronized(STORE_LOCK) {
+            val safe = index.coerceAtLeast(0)
+            val ord = source.ordinal
+            ramWpIndices[ord] = safe
+            if (persistImmediately) {
+                if (persistedWpIndices[ord] != safe) {
+                    sp.edit().putInt(wpIndexKey(source), safe).apply()
+                    persistedWpIndices[ord] = safe
+                }
+                dirtyWpIndices[ord] = false
+            } else {
+                dirtyWpIndices[ord] = (persistedWpIndices[ord] != safe)
             }
-            dirtyWpIndices[ord] = false
-        } else {
-            dirtyWpIndices[ord] = (persistedWpIndices[ord] != safe)
         }
     }
 
     fun flushWallpaperIndices() {
-        var edit: SharedPreferences.Editor? = null
-        for (src in WallpaperSource.entries) {
-            val ord = src.ordinal
-            if (dirtyWpIndices[ord]) {
-                val cur = ramWpIndices[ord]
-                if (persistedWpIndices[ord] != cur) {
-                    edit = (edit ?: sp.edit()).putInt(wpIndexKey(src), cur)
-                    persistedWpIndices[ord] = cur
+        synchronized(STORE_LOCK) {
+            var edit: SharedPreferences.Editor? = null
+            for (src in WallpaperSource.entries) {
+                val ord = src.ordinal
+                if (dirtyWpIndices[ord]) {
+                    val cur = ramWpIndices[ord]
+                    if (persistedWpIndices[ord] != cur) {
+                        edit = (edit ?: sp.edit()).putInt(wpIndexKey(src), cur)
+                        persistedWpIndices[ord] = cur
+                    }
+                    dirtyWpIndices[ord] = false
                 }
-                dirtyWpIndices[ord] = false
             }
+            edit?.apply()
         }
-        edit?.apply()
     }
 
     private fun readActiveWallpaperSource(): WallpaperSource =
@@ -372,6 +382,7 @@ class LauncherStore private constructor(
         private const val KEY_WEB_PORT = "web_remote_port"
         private const val KEY_WEB_PIN = "web_remote_pin"
 
+        private val STORE_LOCK = Any()
         private val RNG = SecureRandom()
 
         fun generatePin(): String {

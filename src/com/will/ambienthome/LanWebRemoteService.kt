@@ -37,6 +37,7 @@ import java.io.File
 import java.util.Calendar
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Лёгкий локальный foreground-сервис LAN Web-пульта (:8765), работающий даже поверх плееров
@@ -47,6 +48,8 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var store: LauncherStore
     private var server: LanWebRemoteServer? = null
+
+    @Volatile
     private var cachedHtml: ByteArray? = null
 
     override fun onCreate() {
@@ -102,7 +105,7 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
         val nightNow = NightSchedule.isNightActive(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), st.features.night)
         val sleep = SleepTimerController.currentState()
         val weather = WeatherClient.getCached(st.features.weather)
-        val apps = AppRepository.orderVisible(AppRepository.loadAll(applicationContext, st.features.wol), st.layout)
+        val apps = AppRepository.orderVisible(AppRepository.loadLightweight(applicationContext, st.features.wol), st.layout)
             .map { mapOf("package" to it.packageName, "label" to it.label, "virtual" to it.isVirtual) }
         val usb = AudioDeviceObserver.listExternalUsbVolumes(applicationContext)
             .map { mapOf("id" to it.id, "label" to it.label) }
@@ -110,7 +113,7 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
             .map { mapOf("w" to it.first, "h" to it.second, "fps" to it.third) }
         return linkedMapOf(
             "ok" to true,
-            "version" to "3.0.0",
+            "version" to "3.0.1",
             "bridgeAvailable" to RootBridgeClient.isAvailable(applicationContext),
             "nightActive" to nightNow,
             "nightMode" to st.features.night.mode.name,
@@ -298,12 +301,12 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
 
     private fun commitClipboardSync(text: String): Boolean {
         val latch = CountDownLatch(1)
-        var ok = false
+        val ok = AtomicBoolean(false)
         mainHandler.post {
             try {
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 cm?.setPrimaryClip(ClipData.newPlainText("remote", text))
-                ok = cm != null
+                ok.set(cm != null)
             } catch (t: Throwable) {
                 Log.w(TAG, "setPrimaryClip failed", t)
             } finally {
@@ -311,7 +314,7 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
             }
         }
         latch.await(1500L, TimeUnit.MILLISECONDS)
-        return ok
+        return ok.get()
     }
 
     private fun saveViaMediaStore(safeFileName: String, bytes: ByteArray): Boolean {
@@ -354,18 +357,26 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
     }
 
     private fun saveViaDirectFile(safeFileName: String, bytes: ByteArray): Boolean {
+        var tmp: File? = null
         return try {
             val dir = File("/sdcard/Pictures/Wallpapers")
             dir.mkdirs()
             val dirCanon = dir.canonicalPath
             val target = File(dir, safeFileName)
             if (target.canonicalFile.parent != dirCanon) return false
-            val tmp = File(dir, ".tmp_$safeFileName")
+            tmp = File(dir, ".tmp_$safeFileName")
             tmp.writeBytes(bytes)
-            tmp.renameTo(target)
+            val renamed = tmp.renameTo(target)
+            if (renamed) tmp = null
+            renamed
         } catch (t: Throwable) {
             Log.w(TAG, "Direct wallpaper save failed", t)
             false
+        } finally {
+            try {
+                tmp?.delete()
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -408,9 +419,11 @@ class LanWebRemoteService : Service(), LanWebRemoteRouter.Backend {
         fun ensurePinGenerated(store: LauncherStore): String {
             val existing = store.readState().features.webRemote.pin
             if (existing.length == 6) return existing
-            val pin = LauncherStore.generatePin()
-            store.updateFeatures { it.copy(webRemote = it.webRemote.copy(pin = pin)) }
-            return pin
+            val updated = store.updateFeatures { f ->
+                if (f.webRemote.pin.length == 6) f
+                else f.copy(webRemote = f.webRemote.copy(pin = LauncherStore.generatePin()))
+            }
+            return updated.features.webRemote.pin
         }
 
         fun syncRunning(ctx: Context, enabled: Boolean) {

@@ -202,12 +202,15 @@ class HomeCanvasView(
         if (nav.ambientActive) syncAmbientClock() else if (showClockEnabled) invalidate()
     }
 
-    fun setAmbientMode(enabled: Boolean) {
-        if (nav.ambientActive == enabled) return
+    fun setAmbientMode(enabled: Boolean, forceSync: Boolean = false) {
+        val changed = nav.ambientActive != enabled
+        if (!changed && !forceSync) return
         nav = nav.copy(ambientActive = enabled)
         syncAmbientClock()
-        if (enabled) renderer.release(panelsOnly = true)
-        invalidate()
+        if (changed) {
+            if (enabled) renderer.release(panelsOnly = true)
+            invalidate()
+        }
     }
 
     // ------------------------------------------------------------ Жизненный цикл View
@@ -472,7 +475,7 @@ class HomeCanvasView(
     }
 
     private fun syncAmbientClock() {
-        host.onAmbientClockUpdate(nav.ambientActive && showClockEnabled, cachedTime, cachedDate, minuteTickCount)
+        host.onAmbientClockUpdate(nav.ambientActive, cachedTime, cachedDate, minuteTickCount)
     }
 
     private fun hasMediaNow(): Boolean = nowPlaying != null && nav.mode == HomeMode.DOCK

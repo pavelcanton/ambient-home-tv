@@ -1,4 +1,4 @@
-﻿# build.ps1 — сборка Ambient Home 3.0.0 (Kotlin unit tests + Pure Kotlin 2.1.10 + R8 shrinking + aapt2 + true STORED DEX + zipalign + apksigner).
+﻿# build.ps1 — сборка Ambient Home 3.0.1 (Kotlin unit tests + Pure Kotlin 2.1.10 + R8 shrinking + aapt2 + true STORED DEX + zipalign + apksigner).
 param(
     [switch]$SkipTests
 )
@@ -75,7 +75,9 @@ if ($SkipTests) {
         'WeatherClient.kt',
         'OnlineWallpaperProvider.kt',
         'LanWebRemoteRouter.kt',
+        'LanWebRemoteServer.kt',
         'RootBridgeClient.kt',
+        'SleepTimerController.kt',
         'SystemStatusHelper.kt'
     ) | ForEach-Object { Join-Path $root "src\com\will\ambienthome\data\$_" }
     $testSources  = @(Get-ChildItem $testDir -Recurse -Filter *.kt | ForEach-Object { $_.FullName })

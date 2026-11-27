@@ -41,6 +41,7 @@ object LauncherStoreTest {
         testInvalidDiskValuesClampedOnRead()
         testDirtyRamWithUpdateAppearance()
         testV3FeaturesPersistenceAndNormalization()
+        testConcurrentMultiThreadStoreUpdates()
 
         println("LauncherStoreTest: passed=$passed failed=$failed")
         if (failed > 0) {
@@ -324,6 +325,63 @@ object LauncherStoreTest {
         checkEq("round-trip features", st.features, reloaded.features)
     }
 
+    private fun testConcurrentMultiThreadStoreUpdates() {
+        val sp = FakeSharedPreferences(mutableMapOf("migrated_v2" to true))
+        val s1 = LauncherStore(sp, legacySp = null)
+        val s2 = LauncherStore(sp, legacySp = null)
+        val s3 = LauncherStore(sp, legacySp = null)
+        val s4 = LauncherStore(sp, legacySp = null)
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val startLatch = java.util.concurrent.CountDownLatch(1)
+        val rounds = 60
+
+        val threads = listOf(
+            Thread {
+                try {
+                    startLatch.await()
+                    for (i in 1..rounds) {
+                        val p = i.toString().padStart(6, '0')
+                        s1.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(pin = p)) }
+                    }
+                } catch (t: Throwable) { errors.add(t) }
+            },
+            Thread {
+                try {
+                    startLatch.await()
+                    for (i in 1..rounds) {
+                        s2.updateFeatures { f -> f.copy(weather = com.will.ambienthome.model.WeatherConfig("City$i", 55.0, 37.0)) }
+                    }
+                } catch (t: Throwable) { errors.add(t) }
+            },
+            Thread {
+                try {
+                    startLatch.await()
+                    for (i in 1..rounds) {
+                        s3.updateFeatures { f -> f.copy(wol = f.wol.copy(name = "PC-$i", mac = "AA:BB:CC:DD:EE:FF")) }
+                    }
+                } catch (t: Throwable) { errors.add(t) }
+            },
+            Thread {
+                try {
+                    startLatch.await()
+                    for (i in 1..rounds) {
+                        s4.updateFeatures { f -> f.copy(night = f.night.copy(startHour = i % 24)) }
+                    }
+                } catch (t: Throwable) { errors.add(t) }
+            }
+        )
+        threads.forEach { it.start() }
+        startLatch.countDown()
+        threads.forEach { it.join(10_000L) }
+
+        val finalState = LauncherStore(sp, legacySp = null).readState()
+        checkEq("concurrent store updates threw 0 errors", 0, errors.size)
+        checkEq("concurrent PIN last write preserved", rounds.toString().padStart(6, '0'), finalState.features.webRemote.pin)
+        checkEq("concurrent weather last write preserved", "City$rounds", finalState.features.weather.cityName)
+        checkEq("concurrent wol last write preserved", "PC-$rounds", finalState.features.wol.name)
+        checkEq("concurrent night startHour last write preserved", rounds % 24, finalState.features.night.startHour)
+    }
+
     private class FakeSharedPreferences(
         private val data: MutableMap<String, Any?> = LinkedHashMap()
     ) : SharedPreferences {
@@ -331,21 +389,39 @@ object LauncherStoreTest {
         var applyCount: Int = 0
             private set
 
+        @Synchronized
         override fun getAll(): MutableMap<String, *> = LinkedHashMap(data)
+        @Synchronized
         override fun getString(key: String?, defValue: String?): String? = (data[key] as? String) ?: defValue
 
+        @Synchronized
         @Suppress("UNCHECKED_CAST")
         override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? =
             (data[key] as? MutableSet<String>) ?: defValues
 
+        @Synchronized
         override fun getInt(key: String?, defValue: Int): Int = (data[key] as? Int) ?: defValue
+        @Synchronized
         override fun getLong(key: String?, defValue: Long): Long = (data[key] as? Long) ?: defValue
+        @Synchronized
         override fun getFloat(key: String?, defValue: Float): Float = (data[key] as? Float) ?: defValue
+        @Synchronized
         override fun getBoolean(key: String?, defValue: Boolean): Boolean = (data[key] as? Boolean) ?: defValue
+        @Synchronized
         override fun contains(key: String?): Boolean = data.containsKey(key)
         override fun edit(): SharedPreferences.Editor = FakeEditor()
         override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
         override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
+
+        @Synchronized
+        private fun commitBatch(clearAll: Boolean, removals: Set<String>, updates: Map<String, Any?>) {
+            if (clearAll) data.clear()
+            for (k in removals) data.remove(k)
+            for ((k, v) in updates) {
+                if (v == null) data.remove(k) else data[k] = v
+            }
+            applyCount++
+        }
 
         private inner class FakeEditor : SharedPreferences.Editor {
             private val updates = LinkedHashMap<String, Any?>()
@@ -393,12 +469,7 @@ object LauncherStoreTest {
             }
 
             private fun applyChanges() {
-                if (clearAll) data.clear()
-                for (k in removals) data.remove(k)
-                for ((k, v) in updates) {
-                    if (v == null) data.remove(k) else data[k] = v
-                }
-                applyCount++
+                commitBatch(clearAll, removals, updates)
             }
         }
     }

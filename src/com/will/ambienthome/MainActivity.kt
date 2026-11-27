@@ -89,7 +89,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
     }
 
     private val ambientIdleTask = Runnable {
-        if (!resumed || state.appearance.ambientTimeoutMin <= 0) return@Runnable
+        if (!resumed || ambientBlackout || state.appearance.ambientTimeoutMin <= 0) return@Runnable
         if (activeDialog?.isShowing == true) {
             resetAmbientTimer()
             return@Runnable
@@ -158,7 +158,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         state = store.readState()
 
         applyImmersive()
-        homeView.setAmbientMode(blackoutOnResume)
+        homeView.setAmbientMode(blackoutOnResume, forceSync = blackoutOnResume)
         homeView.updateClockText()
         homeView.applyAppearance(state.appearance.homeMode, state.appearance.showClock, forceMode = false, resetTopFocus = !first)
         homeView.requestFocus()
@@ -180,7 +180,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         systemObservers.start()
         scheduleNetworkStatusRefresh()
         scheduleNextMinuteTick()
-        resetAmbientTimer()
+        if (blackoutOnResume) mainHandler.removeCallbacks(ambientIdleTask) else resetAmbientTimer()
         pushWidgetsState()
     }
 
@@ -263,7 +263,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         dlg = TvDialogs.showAppContext(
             ctx = this, entry = entry, isPinned = isPinned,
             canMoveLeft = bounds.canMoveLeft, canMoveRight = bounds.canMoveRight,
-            onDismiss = { if (activeDialog === dlg) activeDialog = null; resetAmbientTimer() },
+            onDismiss = { if (activeDialog === dlg) { activeDialog = null; resetAmbientTimer() } },
             listener = buildAppMenuListener()
         )
         activeDialog = dlg
@@ -318,6 +318,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
     override fun onAmbientClockUpdate(active: Boolean, time: String, date: String, tickCount: Int) {
         val overlay = AmbientOverlayData(
             clockStyle = state.appearance.clockStyle,
+            showClock = state.appearance.showClock,
             nightActive = wallpaperController.isNightNow(),
             blackout = ambientBlackout,
             weatherSummary = features.weatherSnapshot?.ambientSummary.orEmpty(),
@@ -372,14 +373,22 @@ class MainActivity : Activity(), HomeCanvasView.Host {
                 if (refreshApps) refreshAppsAsync(preservePkg = null)
                 pushWidgetsState()
             }
-            override fun onDialogChanged(dialog: Dialog?) {
-                if (dialog != null) activeDialog?.dismiss()
+            override fun onDialogShown(dialog: Dialog) {
+                if (activeDialog !== dialog) activeDialog?.dismiss()
                 activeDialog = dialog
-                if (dialog == null) resetAmbientTimer()
+            }
+            override fun onDialogDismissed(dialog: Dialog) {
+                if (activeDialog === dialog) {
+                    activeDialog = null
+                    resetAmbientTimer()
+                }
             }
             override fun onEvent(event: MainFeatureCoordinator.Event, arg: String) {
                 when (event) {
-                    MainFeatureCoordinator.Event.AMBIENT_NOW -> { ambientBlackout = false; homeView.setAmbientMode(true) }
+                    MainFeatureCoordinator.Event.AMBIENT_NOW -> {
+                        ambientBlackout = false
+                        homeView.setAmbientMode(true, forceSync = true)
+                    }
                     MainFeatureCoordinator.Event.NEXT_WALLPAPER -> wallpaperController.requestIfNeeded(advance = true, persistImmediately = true)
                     MainFeatureCoordinator.Event.WIDGETS_DIRTY -> pushWidgetsState()
                     MainFeatureCoordinator.Event.LAUNCH_PACKAGE -> launchByPackage(arg)
@@ -410,7 +419,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
         if (isFinishing || isDestroyed) return
         when (evt) {
             "next_wallpaper" -> wallpaperController.requestIfNeeded(advance = true, persistImmediately = true)
-            "ambient_now" -> { ambientBlackout = false; homeView.setAmbientMode(true) }
+            "ambient_now" -> { ambientBlackout = false; homeView.setAmbientMode(true, forceSync = true) }
             "media_play_pause" -> mediaBridge.togglePlayPause()
             "media_next" -> mediaBridge.skipNext()
             "wallpaper_uploaded" -> wallpaperController.requestIfNeeded(advance = false, persistImmediately = false, forceReload = true)
@@ -426,8 +435,9 @@ class MainActivity : Activity(), HomeCanvasView.Host {
     }
 
     private fun enterSleepBlackout() {
+        mainHandler.removeCallbacks(ambientIdleTask)
         ambientBlackout = true
-        homeView.setAmbientMode(true)
+        homeView.setAmbientMode(true, forceSync = true)
     }
 
     private fun consumeSleepBlackoutExtra(incoming: Intent?): Boolean {
@@ -519,7 +529,7 @@ class MainActivity : Activity(), HomeCanvasView.Host {
     private fun resetAmbientTimer() {
         mainHandler.removeCallbacks(ambientIdleTask)
         val min = state.appearance.ambientTimeoutMin
-        if (!resumed || min <= 0) return
+        if (!resumed || ambientBlackout || min <= 0) return
         mainHandler.postDelayed(ambientIdleTask, min * 60_000L)
     }
 

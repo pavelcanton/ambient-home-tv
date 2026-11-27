@@ -30,10 +30,11 @@ internal class HomeWidgetsRenderer(
     private val bannerRect = RectF()
 
     private var cachedTitle: String = ""
-    private var cachedSubtitle: String = ""
+    private var cachedSubtitleLine: String = ""
     private var lastTitleRaw: String = ""
     private var lastSubRaw: String = ""
     private var lastU: Float = 0f
+    private var lastMaxW: Float = 0f
 
     fun draw(canvas: Canvas, frame: HomeRenderFrame, u: Float) {
         val np = frame.nowPlaying
@@ -101,16 +102,17 @@ internal class HomeWidgetsRenderer(
         alpha: Int,
         u: Float
     ) {
-        if (lastTitleRaw != np.displayTitle || lastSubRaw != np.displaySubtitle || lastU != u) {
+        if (lastTitleRaw != np.displayTitle || lastSubRaw != np.displaySubtitle || lastU != u || lastMaxW != maxW) {
             textPaint.typeface = tfMedium
             textPaint.textSize = 21f * u
             cachedTitle = ellipsize(np.displayTitle, textPaint, maxW)
             textPaint.typeface = tfLight
             textPaint.textSize = 16f * u
-            cachedSubtitle = ellipsize(np.displaySubtitle, textPaint, maxW)
+            cachedSubtitleLine = ellipsize("♫  ${np.displaySubtitle}", textPaint, maxW)
             lastTitleRaw = np.displayTitle
             lastSubRaw = np.displaySubtitle
             lastU = u
+            lastMaxW = maxW
         }
         textPaint.textAlign = Paint.Align.LEFT
         textPaint.typeface = tfMedium
@@ -121,7 +123,7 @@ internal class HomeWidgetsRenderer(
         textPaint.typeface = tfLight
         textPaint.textSize = 16f * u
         textPaint.color = scaleAlpha(0xB87FD8A0.toInt(), alpha)
-        c.drawText("♫  $cachedSubtitle", x, top + 58f * u, textPaint)
+        c.drawText(cachedSubtitleLine, x, top + 58f * u, textPaint)
     }
 
     private fun drawMediaButton(c: Canvas, rect: RectF, glyph: String, focused: Boolean, alpha: Int, u: Float) {
@@ -160,8 +162,11 @@ internal class HomeWidgetsRenderer(
         if (text.isEmpty() || paint.measureText(text) <= maxWidth) return text
         val ellipsis = "…"
         val avail = (maxWidth - paint.measureText(ellipsis)).coerceAtLeast(0f)
-        val count = paint.breakText(text, true, avail, null).coerceIn(1, text.length)
-        return text.substring(0, count) + ellipsis
+        var count = paint.breakText(text, true, avail, null).coerceIn(0, text.length)
+        if (count > 0 && count < text.length && Character.isHighSurrogate(text[count - 1])) {
+            count--
+        }
+        return if (count <= 0) ellipsis else text.substring(0, count) + ellipsis
     }
 
     private fun scaleAlpha(argb: Int, masterAlpha: Int): Int {

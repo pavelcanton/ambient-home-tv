@@ -15,8 +15,8 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Клиент погоды Open-Meteo (без API-ключа, RAM-кэш, 0 Б на eMMC).
- * Обновляет прогноз не чаще раза в 45 мин только при активном HOME.
+ * Клиент погоды Open-Meteo (без API-ключа, атомарный RAM-кэш, 0 Б на eMMC).
+ * Обновляет прогноз не чаще раза в 45 мин по монотонным часам только при активном HOME.
  */
 object WeatherClient {
 
@@ -24,6 +24,12 @@ object WeatherClient {
     const val REFRESH_TTL_MS = 45L * 60L * 1000L
     private const val CONNECT_TIMEOUT_MS = 6000
     private const val READ_TIMEOUT_MS = 7000
+
+    private data class CachedEntry(
+        val cityKey: String,
+        val snapshot: WeatherSnapshot,
+        val fetchedElapsedMs: Long
+    )
 
     val RU_CITY_PRESETS: List<CityPreset> = listOf(
         CityPreset("Москва", "Россия", 55.7558, 37.6173),
@@ -37,21 +43,22 @@ object WeatherClient {
     )
 
     @Volatile
-    private var cachedSnapshot: WeatherSnapshot? = null
+    private var cachedEntry: CachedEntry? = null
 
-    @Volatile
-    private var cachedCityKey: String = ""
+    internal var elapsedClockMs: () -> Long = { OnlineWallpaperProvider.safeElapsedMs() }
 
     fun getCached(config: WeatherConfig): WeatherSnapshot? {
         if (!config.isConfigured) return null
-        val key = cityKey(config)
-        val snap = cachedSnapshot
-        return if (snap != null && cachedCityKey == key) snap else null
+        val entry = cachedEntry ?: return null
+        return if (entry.cityKey == cityKey(config)) entry.snapshot else null
     }
 
-    fun isStale(config: WeatherConfig, nowMs: Long = System.currentTimeMillis()): Boolean {
-        val snap = getCached(config) ?: return true
-        return (nowMs - snap.fetchedAtMs) >= REFRESH_TTL_MS
+    fun isStale(config: WeatherConfig, nowElapsedMs: Long = elapsedClockMs()): Boolean {
+        if (!config.isConfigured) return true
+        val entry = cachedEntry ?: return true
+        if (entry.cityKey != cityKey(config)) return true
+        val age = nowElapsedMs - entry.fetchedElapsedMs
+        return age < 0L || age >= REFRESH_TTL_MS
     }
 
     fun fetchForecast(config: WeatherConfig): WeatherSnapshot? {
@@ -67,8 +74,7 @@ object WeatherClient {
         )
         val body = httpGet(url) ?: return getCached(config)
         val parsed = parseForecastJson(body, config.cityName, System.currentTimeMillis()) ?: return getCached(config)
-        cachedCityKey = cityKey(config)
-        cachedSnapshot = parsed
+        cachedEntry = CachedEntry(cityKey(config), parsed, elapsedClockMs())
         return parsed
     }
 
@@ -134,6 +140,14 @@ object WeatherClient {
         else -> WeatherIcon.CLOUDY to "Облачно"
     }
 
+    internal fun putCacheForTest(config: WeatherConfig, snapshot: WeatherSnapshot, fetchedElapsedMs: Long) {
+        cachedEntry = CachedEntry(cityKey(config), snapshot, fetchedElapsedMs)
+    }
+
+    internal fun clearCacheForTest() {
+        cachedEntry = null
+    }
+
     private fun parseHourly(hourly: Map<*, *>?): List<HourlyForecast> {
         if (hourly == null) return emptyList()
         val times = hourly["time"] as? List<*> ?: return emptyList()
@@ -191,10 +205,10 @@ object WeatherClient {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 requestMethod = "GET"
-                setRequestProperty("User-Agent", "AmbientHome/3.0 (AndroidTV)")
+                setRequestProperty("User-Agent", "AmbientHome/3.0.1 (AndroidTV)")
             }
             if (conn.responseCode != 200) return null
-            conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            OnlineWallpaperProvider.readBoundedUtf8(conn.inputStream, OnlineWallpaperProvider.MAX_HTTP_JSON_BYTES)
         } catch (t: Throwable) {
             Log.w(TAG, "WeatherClient GET failed", t)
             null

@@ -32,6 +32,7 @@ object AppRepository {
 
     private const val TILE_PX = 192
     private const val CORNER_RATIO = 0.23f
+    private const val LIGHT_CACHE_TTL_MS = 30_000L
 
     private val DEFAULT_PRIORITY = listOf(
         "org.smarttube.stable",
@@ -49,18 +50,23 @@ object AppRepository {
     )
 
     private data class BakedTile(val bitmap: Bitmap, val accentColor: Int)
+    private data class LightAppCache(val entries: List<AppEntry>, val loadedElapsedMs: Long)
 
     private val tileCache = ConcurrentHashMap<String, BakedTile>()
+
+    @Volatile
+    private var lightAppCache: LightAppCache? = null
 
     fun loadAll(ctx: Context, wolTarget: WolTarget = WolTarget()): List<AppEntry> {
         val self = ctx.packageName
         val pm = ctx.packageManager
         val byPackage = LinkedHashMap<String, AppEntry>()
 
-        collect(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, true, byPackage, self)
-        collect(pm, Intent.CATEGORY_LAUNCHER, false, byPackage, self)
+        collect(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, true, byPackage, self, readUpdateTime = true)
+        collect(pm, Intent.CATEGORY_LAUNCHER, false, byPackage, self, readUpdateTime = true)
 
         val rawEntries = byPackage.values.toList()
+        lightAppCache = LightAppCache(rawEntries, OnlineWallpaperProvider.safeElapsedMs())
         val activeKeys = HashSet<String>(rawEntries.size * 2 + 4)
         val entries = ArrayList<AppEntry>(rawEntries.size + 1)
         for (entry in rawEntries) {
@@ -88,6 +94,35 @@ object AppRepository {
             if (it.next() !in activeKeys) it.remove()
         }
         return entries
+    }
+
+    internal fun loadLightweight(ctx: Context, wolTarget: WolTarget = WolTarget()): List<AppEntry> {
+        val now = OnlineWallpaperProvider.safeElapsedMs()
+        val cached = lightAppCache
+        val base = if (cached != null && (now - cached.loadedElapsedMs) in 0L until LIGHT_CACHE_TTL_MS) {
+            cached.entries
+        } else {
+            val self = ctx.packageName
+            val pm = ctx.packageManager
+            val byPackage = LinkedHashMap<String, AppEntry>()
+            collect(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, true, byPackage, self, readUpdateTime = false)
+            collect(pm, Intent.CATEGORY_LAUNCHER, false, byPackage, self, readUpdateTime = false)
+            byPackage.values.toList().also { lightAppCache = LightAppCache(it, now) }
+        }
+        if (!wolTarget.isConfigured) return base
+        val out = ArrayList<AppEntry>(base.size + 1)
+        out.addAll(base)
+        out.add(
+            AppEntry(
+                packageName = CustomShortcuts.WOL_PACKAGE,
+                className = CustomShortcuts.WOL_CLASS,
+                label = wolTarget.name.ifBlank { WolTarget.DEFAULT_NAME },
+                isTvApp = true,
+                lastUpdateTime = 1L,
+                isVirtual = true
+            )
+        )
+        return out
     }
 
     fun orderVisible(all: List<AppEntry>, layout: AppsLayoutState): List<AppEntry> {
@@ -253,7 +288,8 @@ object AppRepository {
         category: String,
         isTv: Boolean,
         out: LinkedHashMap<String, AppEntry>,
-        self: String
+        self: String,
+        readUpdateTime: Boolean
     ) {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(category)
         val list = try {
@@ -272,11 +308,13 @@ object AppRepository {
             } catch (_: Throwable) {
                 pkg
             }
-            val updated = try {
-                pm.getPackageInfo(pkg, 0).lastUpdateTime
-            } catch (_: Throwable) {
-                0L
-            }
+            val updated = if (readUpdateTime) {
+                try {
+                    pm.getPackageInfo(pkg, 0).lastUpdateTime
+                } catch (_: Throwable) {
+                    0L
+                }
+            } else 0L
             out[pkg] = AppEntry(
                 packageName = pkg,
                 className = ai.name,

@@ -167,9 +167,9 @@ object WallpaperRepository {
                 null
             } ?: continue
             for (f in children) {
-                if (!f.isFile || !f.canRead()) continue
+                if (f.extension.lowercase() !in IMAGE_EXTS) continue
+                if (!LanWebRemoteRouter.hasValidImageFileHeader(f)) continue
                 val len = f.length()
-                if (f.extension.lowercase() !in IMAGE_EXTS || len !in 10_000L..35_000_000L) continue
                 val path = f.absolutePath
                 if (seen.add(path)) visit(f, len, path)
             }

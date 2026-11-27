@@ -31,8 +31,12 @@ class AudioDeviceObserver(
         if (callback != null) return
         val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         val cb = object : AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refresh(am)
-            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = refresh(am)
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                if (callback === this) refresh(am)
+            }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                if (callback === this) refresh(am)
+            }
         }
         try {
             am.registerAudioDeviceCallback(cb, mainHandler)

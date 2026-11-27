@@ -159,9 +159,12 @@ class SettingsActivity : Activity() {
             state = next
             bindRows()
         }
-        override fun onDialogChanged(dlg: Dialog?) {
-            if (dlg != null) activeDialog?.dismiss()
+        override fun onDialogShown(dlg: Dialog) {
+            if (activeDialog !== dlg) activeDialog?.dismiss()
             activeDialog = dlg
+        }
+        override fun onDialogDismissed(dlg: Dialog) {
+            if (activeDialog === dlg) activeDialog = null
         }
     }
 
@@ -172,9 +175,9 @@ class SettingsActivity : Activity() {
             setPadding(dp(56), dp(28), dp(56), dp(24))
         }
         val verName = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "3.0.0"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "3.0.1"
         } catch (_: Throwable) {
-            "3.0.0"
+            "3.0.1"
         }
         outer.addView(TextView(this).apply {
             text = "Ambient Home $verName  ·  Настройки"

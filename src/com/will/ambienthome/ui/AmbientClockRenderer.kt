@@ -3,6 +3,7 @@ package com.will.ambienthome.ui
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import com.will.ambienthome.model.AmbientClockLayout
 import com.will.ambienthome.model.AmbientClockStyle
 import com.will.ambienthome.model.AmbientOverlayData
 import com.will.ambienthome.model.NightSchedule
@@ -12,7 +13,7 @@ import kotlin.math.sin
 /**
  * Рендерер Ambient-часов и ненавязчивых оверлеев поверх HWC WallpaperSurfaceView (выделен для Deslop).
  * Поддерживает 4 стиля часов (Тонкие / Кино / Минимал / Аналоговые), перескок по 4 углам раз в 15 мин
- * с сохранением мягкого минутного дрейфа, ночное приглушение яркости, погоду, таймер сна,
+ * с safe-zone на 720p/1080p/4K, ночное приглушение яркости, погоду, таймер сна,
  * подпись «Фото дня» и строку «Сейчас играет».
  */
 internal class AmbientClockRenderer {
@@ -34,26 +35,18 @@ internal class AmbientClockRenderer {
         if (timeText.isEmpty()) return
         val cw = canvas.width.toFloat()
         val ch = canvas.height.toFloat()
-        val u = (ch / 1080f).coerceAtLeast(0.5f)
-        val corner = (tickCount.coerceAtLeast(0) / 15) % 4
-        val driftX = (sin(tickCount * 0.45) * 24.0).toFloat() * u
-        val driftY = (cos(tickCount * 0.35) * 18.0).toFloat() * u
+        val layout = AmbientClockLayout.compute(cw, ch, tickCount, overlay.clockStyle)
         val alpha = if (overlay.blackout) 92 else NightSchedule.clockLuminanceAlpha(overlay.nightActive)
-        val rightAligned = corner == 2 || corner == 3
-        val topAnchored = corner == 1 || corner == 2
 
-        val anchorX = (if (rightAligned) cw - 96f * u else 96f * u) + driftX
-        val anchorY = (if (topAnchored) 224f * u else ch - 160f * u) + driftY
-
-        val subY = when (overlay.clockStyle) {
-            AmbientClockStyle.THIN -> drawThinStyle(canvas, timeText, dateText, anchorX, anchorY, rightAligned, alpha, u)
-            AmbientClockStyle.CINEMA -> drawCinemaStyle(canvas, timeText, dateText, anchorX, anchorY, rightAligned, alpha, overlay.nightActive, u)
-            AmbientClockStyle.MINIMAL -> drawMinimalStyle(canvas, timeText, dateText, anchorX, anchorY, rightAligned, alpha, u)
-            AmbientClockStyle.ANALOG -> drawAnalogStyle(canvas, timeText, dateText, anchorX, anchorY, rightAligned, alpha, u)
+        when (overlay.clockStyle) {
+            AmbientClockStyle.THIN -> drawThinStyle(canvas, timeText, dateText, layout, alpha)
+            AmbientClockStyle.CINEMA -> drawCinemaStyle(canvas, timeText, dateText, layout, alpha, overlay.nightActive)
+            AmbientClockStyle.MINIMAL -> drawMinimalStyle(canvas, timeText, dateText, layout, alpha)
+            AmbientClockStyle.ANALOG -> drawAnalogStyle(canvas, timeText, dateText, layout, alpha)
         }
-        drawAmbientMeta(canvas, overlay, anchorX, subY, rightAligned, alpha, u)
+        drawAmbientMeta(canvas, overlay, layout, alpha)
         if (!overlay.blackout && overlay.caption.isNotBlank()) {
-            drawPhotoCaption(canvas, overlay.caption, cw, ch, corner, alpha, u)
+            drawPhotoCaption(canvas, overlay.caption, cw, ch, layout.corner, alpha, layout.u)
         }
     }
 
@@ -61,103 +54,89 @@ internal class AmbientClockRenderer {
         c: Canvas,
         time: String,
         date: String,
-        x: Float,
-        y: Float,
-        right: Boolean,
-        alpha: Int,
-        u: Float
-    ): Float {
-        textPaint.textAlign = if (right) Paint.Align.RIGHT else Paint.Align.LEFT
+        l: AmbientClockLayout,
+        alpha: Int
+    ) {
+        val u = l.u
+        textPaint.textAlign = if (l.rightAligned) Paint.Align.RIGHT else Paint.Align.LEFT
         textPaint.typeface = tfThin
         textPaint.textSize = 152f * u
         textPaint.letterSpacing = -0.02f
-        drawShadowed(c, time, x, y, argb(alpha, 0xFFFFFF), u)
+        drawShadowed(c, time, l.anchorX, l.anchorY, argb(alpha, 0xFFFFFF), u)
 
         textPaint.typeface = tfLight
         textPaint.textSize = 34f * u
         textPaint.letterSpacing = 0.04f
-        val dx = if (right) -4f * u else 6f * u
-        drawShadowed(c, date, x + dx, y + 50f * u, argb((alpha * 86) / 100, 0xFFFFFF), u)
+        val dx = if (l.rightAligned) -4f * u else 6f * u
+        drawShadowed(c, ellipsize(date, l.maxTextWidth), l.anchorX + dx, l.anchorY + 50f * u, argb((alpha * 86) / 100, 0xFFFFFF), u)
         textPaint.letterSpacing = 0f
-        return y + 92f * u
     }
 
     private fun drawCinemaStyle(
         c: Canvas,
         time: String,
         date: String,
-        x: Float,
-        y: Float,
-        right: Boolean,
+        l: AmbientClockLayout,
         alpha: Int,
-        night: Boolean,
-        u: Float
-    ): Float {
-        textPaint.textAlign = if (right) Paint.Align.RIGHT else Paint.Align.LEFT
+        night: Boolean
+    ) {
+        val u = l.u
+        textPaint.textAlign = if (l.rightAligned) Paint.Align.RIGHT else Paint.Align.LEFT
         textPaint.typeface = tfMedium
         textPaint.textSize = 144f * u
         textPaint.letterSpacing = 0.02f
         val mainRgb = if (night) 0xFFE3B8 else 0xFFF5E6
-        drawShadowed(c, time, x, y, argb(alpha, mainRgb), u)
+        drawShadowed(c, time, l.anchorX, l.anchorY, argb(alpha, mainRgb), u)
 
         val lineW = 140f * u
-        val lineLeft = if (right) x - lineW else x + 4f * u
+        val lineLeft = if (l.rightAligned) l.anchorX - lineW else l.anchorX + 4f * u
         fillPaint.color = argb((alpha * 65) / 100, 0xE8B46A)
-        c.drawRect(lineLeft, y + 18f * u, lineLeft + lineW, y + 21f * u, fillPaint)
+        c.drawRect(lineLeft, l.anchorY + 18f * u, lineLeft + lineW, l.anchorY + 21f * u, fillPaint)
 
         textPaint.typeface = tfLight
         textPaint.textSize = 30f * u
         textPaint.letterSpacing = 0.08f
-        drawShadowed(c, date.uppercase(), x, y + 58f * u, argb((alpha * 82) / 100, 0xFFFFFF), u)
+        drawShadowed(c, ellipsize(date.uppercase(), l.maxTextWidth), l.anchorX, l.anchorY + 58f * u, argb((alpha * 82) / 100, 0xFFFFFF), u)
         textPaint.letterSpacing = 0f
-        return y + 98f * u
     }
 
     private fun drawMinimalStyle(
         c: Canvas,
         time: String,
         date: String,
-        x: Float,
-        y: Float,
-        right: Boolean,
-        alpha: Int,
-        u: Float
-    ): Float {
-        textPaint.textAlign = if (right) Paint.Align.RIGHT else Paint.Align.LEFT
+        l: AmbientClockLayout,
+        alpha: Int
+    ) {
+        val u = l.u
+        textPaint.textAlign = if (l.rightAligned) Paint.Align.RIGHT else Paint.Align.LEFT
         textPaint.typeface = tfLight
         textPaint.textSize = 98f * u
         textPaint.letterSpacing = 0.01f
-        drawShadowed(c, time, x, y, argb(alpha, 0xFFFFFF), u)
+        drawShadowed(c, time, l.anchorX, l.anchorY, argb(alpha, 0xFFFFFF), u)
 
         textPaint.textSize = 26f * u
         textPaint.letterSpacing = 0.03f
-        drawShadowed(c, date, x, y + 40f * u, argb((alpha * 78) / 100, 0xFFFFFF), u)
+        drawShadowed(c, ellipsize(date, l.maxTextWidth), l.anchorX, l.anchorY + 40f * u, argb((alpha * 78) / 100, 0xFFFFFF), u)
         textPaint.letterSpacing = 0f
-        return y + 78f * u
     }
 
     private fun drawAnalogStyle(
         c: Canvas,
         time: String,
         date: String,
-        x: Float,
-        y: Float,
-        right: Boolean,
-        alpha: Int,
-        u: Float
-    ): Float {
-        val radius = 84f * u
-        val cx = if (right) x - radius else x + radius
-        val cy = y - 34f * u
-        drawAnalogDial(c, cx, cy, radius, time, alpha, u)
+        l: AmbientClockLayout,
+        alpha: Int
+    ) {
+        val u = l.u
+        drawAnalogDial(c, l.analogCx, l.analogCy, l.analogRadius, time, alpha, u)
 
-        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textAlign = if (l.rightAligned) Paint.Align.RIGHT else Paint.Align.LEFT
         textPaint.typeface = tfLight
         textPaint.textSize = 28f * u
         textPaint.letterSpacing = 0.03f
-        drawShadowed(c, date, cx, cy + radius + 42f * u, argb((alpha * 84) / 100, 0xFFFFFF), u)
+        val dateY = l.analogCy + l.analogRadius + 38f * u
+        drawShadowed(c, ellipsize(date, l.maxTextWidth), l.anchorX, dateY, argb((alpha * 84) / 100, 0xFFFFFF), u)
         textPaint.letterSpacing = 0f
-        return cy + radius + 82f * u
     }
 
     private fun drawAnalogDial(
@@ -210,37 +189,26 @@ internal class AmbientClockRenderer {
     private fun drawAmbientMeta(
         c: Canvas,
         overlay: AmbientOverlayData,
-        x: Float,
-        startY: Float,
-        right: Boolean,
-        alpha: Int,
-        u: Float
+        l: AmbientClockLayout,
+        alpha: Int
     ) {
+        val u = l.u
         val parts = ArrayList<String>(2)
         if (overlay.weatherSummary.isNotBlank() && !overlay.blackout) parts.add(overlay.weatherSummary)
         if (overlay.sleepBadge.isNotBlank()) parts.add("🌙 ${overlay.sleepBadge}")
-        var curY = startY
+        var curY = l.subY
         textPaint.typeface = tfLight
-        textPaint.textAlign = if (overlay.clockStyle == AmbientClockStyle.ANALOG) {
-            Paint.Align.CENTER
-        } else if (right) {
-            Paint.Align.RIGHT
-        } else {
-            Paint.Align.LEFT
-        }
-        val textX = if (overlay.clockStyle == AmbientClockStyle.ANALOG) {
-            if (right) x - 84f * u else x + 84f * u
-        } else {
-            x
-        }
+        textPaint.textAlign = if (l.rightAligned) Paint.Align.RIGHT else Paint.Align.LEFT
         if (parts.isNotEmpty()) {
             textPaint.textSize = 24f * u
-            drawShadowed(c, parts.joinToString("   ·   "), textX, curY, argb((alpha * 80) / 100, 0xDCE8FF), u)
-            curY += 34f * u
+            val metaLine = ellipsize(parts.joinToString("   ·   "), l.maxTextWidth)
+            drawShadowed(c, metaLine, l.anchorX, curY, argb((alpha * 80) / 100, 0xDCE8FF), u)
+            curY = l.nowPlayingY
         }
         if (overlay.nowPlayingLine.isNotBlank() && !overlay.blackout) {
             textPaint.textSize = 22f * u
-            drawShadowed(c, "♫  ${overlay.nowPlayingLine}", textX, curY, argb((alpha * 78) / 100, 0x7FD8A0), u)
+            val npLine = ellipsize("♫  ${overlay.nowPlayingLine}", l.maxTextWidth)
+            drawShadowed(c, npLine, l.anchorX, curY, argb((alpha * 78) / 100, 0x7FD8A0), u)
         }
     }
 
@@ -258,7 +226,18 @@ internal class AmbientClockRenderer {
         textPaint.textSize = 20f * u
         textPaint.textAlign = if (placeRight) Paint.Align.RIGHT else Paint.Align.LEFT
         val cx = if (placeRight) cw - 68f * u else 68f * u
-        drawShadowed(c, caption, cx, ch - 44f * u, argb((alpha * 62) / 100, 0xFFFFFF), u)
+        drawShadowed(c, ellipsize(caption, cw * 0.44f), cx, ch - 44f * u, argb((alpha * 62) / 100, 0xFFFFFF), u)
+    }
+
+    private fun ellipsize(text: String, maxWidth: Float): String {
+        if (text.isEmpty() || textPaint.measureText(text) <= maxWidth) return text
+        val ellipsis = "…"
+        val avail = (maxWidth - textPaint.measureText(ellipsis)).coerceAtLeast(0f)
+        var count = textPaint.breakText(text, true, avail, null).coerceIn(0, text.length)
+        if (count > 0 && count < text.length && Character.isHighSurrogate(text[count - 1])) {
+            count--
+        }
+        return if (count <= 0) ellipsis else text.substring(0, count) + ellipsis
     }
 
     private fun drawShadowed(c: Canvas, text: String, x: Float, y: Float, color: Int, u: Float) {

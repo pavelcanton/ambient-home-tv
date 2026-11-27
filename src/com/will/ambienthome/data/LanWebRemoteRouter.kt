@@ -1,6 +1,8 @@
 package com.will.ambienthome.data
 
 import com.will.ambienthome.model.MiniJson
+import java.io.File
+import java.io.FileInputStream
 
 /**
  * Чистый маршрутизатор и шлюз безопасности LAN Web-пульта Ambient Home 3.0.0.
@@ -67,7 +69,7 @@ class LanWebRemoteRouter(
             return HttpResponse(200, CT_HTML, backend.htmlShell())
         }
         if (method == "GET" && path == "/api/ping") {
-            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.0"))
+            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.1"))
         }
         if (!path.startsWith("/api/")) {
             return jsonResponse(404, mapOf("ok" to false, "error" to "not_found"))
@@ -75,6 +77,21 @@ class LanWebRemoteRouter(
         when (checkAuthForPath(path, req.headers)) {
             429 -> return jsonResponse(429, mapOf("ok" to false, "error" to "rate_limited"))
             401 -> return jsonResponse(401, mapOf("ok" to false, "error" to "unauthorized"))
+        }
+        return routeAuthorizedApi(method, path, req)
+    }
+
+    internal fun routePreAuthenticated(req: HttpRequest): HttpResponse {
+        val method = req.method.uppercase()
+        val path = req.path
+        if (method == "GET" && (path == "/" || path == "/index.html")) {
+            return HttpResponse(200, CT_HTML, backend.htmlShell())
+        }
+        if (method == "GET" && path == "/api/ping") {
+            return jsonResponse(200, mapOf("ok" to true, "app" to "AmbientHome", "version" to "3.0.1"))
+        }
+        if (!path.startsWith("/api/")) {
+            return jsonResponse(404, mapOf("ok" to false, "error" to "not_found"))
         }
         return routeAuthorizedApi(method, path, req)
     }
@@ -243,8 +260,38 @@ class LanWebRemoteRouter(
                     }
                     true
                 }
+                "webp" -> bytes.size >= 12 &&
+                    bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() &&
+                    bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
+                    bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() &&
+                    bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
                 else -> false
             }
+        }
+
+        internal fun hasValidImageFileHeader(
+            file: File,
+            minBytes: Long = 64L,
+            maxBytes: Long = 35_000_000L
+        ): Boolean {
+            if (!file.isFile || !file.canRead()) return false
+            val len = file.length()
+            if (len !in minBytes..maxBytes) return false
+            val head = ByteArray(12)
+            val read = try {
+                FileInputStream(file).use { stream ->
+                    var off = 0
+                    while (off < head.size) {
+                        val n = stream.read(head, off, head.size - off)
+                        if (n <= 0) break
+                        off += n
+                    }
+                    off
+                }
+            } catch (_: Throwable) {
+                return false
+            }
+            return hasValidImageMagic(head.copyOf(read), file.name)
         }
     }
 }

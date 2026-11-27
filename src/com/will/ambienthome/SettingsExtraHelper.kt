@@ -43,7 +43,8 @@ internal class SettingsExtraHelper(
         fun currentState(): LauncherState
         fun currentIp(): String
         fun onStateChanged(next: LauncherState)
-        fun onDialogChanged(dlg: Dialog?)
+        fun onDialogShown(dlg: Dialog)
+        fun onDialogDismissed(dlg: Dialog)
     }
 
     private companion object {
@@ -132,35 +133,37 @@ internal class SettingsExtraHelper(
 
     private fun openSleepDialog() {
         val st = host.currentState()
-        val dlg = FeatureDialogs.showSleepTimerPicker(
-            ctx = activity,
-            current = SleepTimerController.currentState(),
-            hdmiOffEnabled = st.features.sleepHdmiOff,
-            bridgeAvailable = RootBridgeClient.isAvailable(activity),
-            onPickMinutes = { mins ->
-                SleepTimerController.startTimer(activity, mins)
-                bindRows()
-            },
-            onToggleHdmiOff = {
-                val next = store.updateFeatures { it.copy(sleepHdmiOff = !it.sleepHdmiOff) }
-                host.onStateChanged(next)
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showSleepTimerPicker(
+                ctx = activity,
+                current = SleepTimerController.currentState(),
+                hdmiOffEnabled = st.features.sleepHdmiOff,
+                bridgeAvailable = RootBridgeClient.isAvailable(activity),
+                onPickMinutes = { mins ->
+                    SleepTimerController.startTimer(activity, mins)
+                    bindRows()
+                },
+                onToggleHdmiOff = {
+                    val next = store.updateFeatures { it.copy(sleepHdmiOff = !it.sleepHdmiOff) }
+                    host.onStateChanged(next)
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openNowPlayingDialog() {
         val granted = MediaSessionBridge.isListenerGranted(activity)
         val cmd = "adb shell cmd notification allow_listener ${activity.packageName}/${activity.packageName}.data.AmbientNotificationListener"
-        val dlg = FeatureDialogs.showNotificationAccessInfo(
-            ctx = activity,
-            granted = granted,
-            adbCommand = cmd,
-            onOpenSettings = { openNotificationListenerSettings() },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showNotificationAccessInfo(
+                ctx = activity,
+                granted = granted,
+                adbCommand = cmd,
+                onOpenSettings = { openNotificationListenerSettings() },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openNotificationListenerSettings() {
@@ -172,46 +175,49 @@ internal class SettingsExtraHelper(
     }
 
     private fun openCityPicker() {
-        val dlg = FeatureDialogs.showCityPicker(
-            ctx = activity,
-            presets = WeatherClient.RU_CITY_PRESETS,
-            currentCity = host.currentState().features.weather.cityName,
-            onPick = { city ->
-                val next = store.updateFeatures { it.copy(weather = WeatherConfig(city.name, city.lat, city.lon)) }
-                host.onStateChanged(next)
-            },
-            onSearchPrompt = { openCitySearch() },
-            onDisable = {
-                val next = store.updateFeatures { it.copy(weather = WeatherConfig()) }
-                host.onStateChanged(next)
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showCityPicker(
+                ctx = activity,
+                presets = WeatherClient.RU_CITY_PRESETS,
+                currentCity = host.currentState().features.weather.cityName,
+                onPick = { city ->
+                    val next = store.updateFeatures { it.copy(weather = WeatherConfig(city.name, city.lat, city.lon)) }
+                    host.onStateChanged(next)
+                },
+                onSearchPrompt = { openCitySearch() },
+                onDisable = {
+                    val next = store.updateFeatures { it.copy(weather = WeatherConfig()) }
+                    host.onStateChanged(next)
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openCitySearch() {
-        val dlg = FeatureDialogs.showTextInput(
-            ctx = activity,
-            title = "Поиск города (Open-Meteo)",
-            hint = "Введите название города",
-            initialValue = host.currentState().features.weather.cityName,
-            onSubmit = { query ->
-                if (query.length < 2) return@showTextInput
-                ioRunner {
-                    val found = WeatherClient.searchCity(query).firstOrNull()
-                    mainHandler.post {
-                        if (found != null) {
-                            val next = store.updateFeatures { it.copy(weather = WeatherConfig(found.name, found.lat, found.lon)) }
-                            host.onStateChanged(next)
-                            toast("Выбран город: ${found.name}")
-                        } else toast("Город не найден")
+        showManaged { onDismiss ->
+            FeatureDialogs.showTextInput(
+                ctx = activity,
+                title = "Поиск города (Open-Meteo)",
+                hint = "Введите название города",
+                initialValue = host.currentState().features.weather.cityName,
+                onSubmit = { query ->
+                    if (query.length < 2) return@showTextInput
+                    ioRunner {
+                        val found = WeatherClient.searchCity(query).firstOrNull()
+                        mainHandler.post {
+                            if (activity.isFinishing || activity.isDestroyed) return@post
+                            if (found != null) {
+                                val next = store.updateFeatures { it.copy(weather = WeatherConfig(found.name, found.lat, found.lon)) }
+                                host.onStateChanged(next)
+                                toast("Выбран город: ${found.name}")
+                            } else toast("Город не найден")
+                        }
                     }
-                }
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openBootAppPicker() {
@@ -222,19 +228,20 @@ internal class SettingsExtraHelper(
             for (a in apps) choices.add(a.packageName to "${a.label}  (${a.packageName})")
             mainHandler.post {
                 if (activity.isFinishing || activity.isDestroyed) return@post
-                val dlg = FeatureDialogs.showChoiceList(
-                    ctx = activity,
-                    title = "Автозапуск после холодного ребута",
-                    items = choices,
-                    onPick = { pkg ->
-                        val next = store.updateFeatures { f ->
-                            f.copy(bootAutoLaunch = f.bootAutoLaunch.copy(enabled = pkg.isNotEmpty(), packageName = pkg))
-                        }
-                        host.onStateChanged(next)
-                    },
-                    onDismiss = { host.onDialogChanged(null) }
-                )
-                host.onDialogChanged(dlg)
+                showManaged { onDismiss ->
+                    FeatureDialogs.showChoiceList(
+                        ctx = activity,
+                        title = "Автозапуск после холодного ребута",
+                        items = choices,
+                        onPick = { pkg ->
+                            val next = store.updateFeatures { f ->
+                                f.copy(bootAutoLaunch = f.bootAutoLaunch.copy(enabled = pkg.isNotEmpty(), packageName = pkg))
+                            }
+                            host.onStateChanged(next)
+                        },
+                        onDismiss = onDismiss
+                    )
+                }
             }
         }
     }
@@ -243,56 +250,58 @@ internal class SettingsExtraHelper(
         val st = host.currentState()
         val pin = LanWebRemoteService.ensurePinGenerated(store)
         val ip = host.currentIp().ifEmpty { "<IP ТВ>" }
-        val dlg = FeatureDialogs.showWebRemoteInfo(
-            ctx = activity,
-            enabled = st.features.webRemote.enabled,
-            url = "http://$ip:${st.features.webRemote.port}",
-            pin = pin,
-            onToggleEnabled = {
-                val next = store.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(enabled = !f.webRemote.enabled)) }
-                LanWebRemoteService.syncRunning(activity, next.features.webRemote.enabled)
-                host.onStateChanged(next)
-            },
-            onRotatePin = {
-                val newPin = LauncherStore.generatePin()
-                val next = store.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(pin = newPin)) }
-                host.onStateChanged(next)
-                toast("Новый PIN: $newPin")
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showWebRemoteInfo(
+                ctx = activity,
+                enabled = st.features.webRemote.enabled,
+                url = "http://$ip:${st.features.webRemote.port}",
+                pin = pin,
+                onToggleEnabled = {
+                    val next = store.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(enabled = !f.webRemote.enabled)) }
+                    LanWebRemoteService.syncRunning(activity, next.features.webRemote.enabled)
+                    host.onStateChanged(next)
+                },
+                onRotatePin = {
+                    val newPin = LauncherStore.generatePin()
+                    val next = store.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(pin = newPin)) }
+                    host.onStateChanged(next)
+                    toast("Новый PIN: $newPin")
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openWolDialog() {
         val cur = host.currentState().features.wol
-        val dlg = FeatureDialogs.showTextInput(
-            ctx = activity,
-            title = "Wake-on-LAN MAC-адрес ПК",
-            hint = "AA:BB:CC:DD:EE:FF (пусто — убрать плитку)",
-            initialValue = cur.mac,
-            onSubmit = { raw ->
-                if (raw.isEmpty()) {
-                    val next = store.updateFeatures { f -> f.copy(wol = f.wol.copy(mac = "")) }
+        showManaged { onDismiss ->
+            FeatureDialogs.showTextInput(
+                ctx = activity,
+                title = "Wake-on-LAN MAC-адрес ПК",
+                hint = "AA:BB:CC:DD:EE:FF (пусто — убрать плитку)",
+                initialValue = cur.mac,
+                onSubmit = { raw ->
+                    if (raw.isEmpty()) {
+                        val next = store.updateFeatures { f -> f.copy(wol = f.wol.copy(mac = "")) }
+                        host.onStateChanged(next)
+                        toast("Плитка WOL скрыта")
+                        return@showTextInput
+                    }
+                    val norm = CustomShortcuts.normalizeMac(raw)
+                    if (norm == null) {
+                        toast("Некорректный MAC-адрес")
+                        return@showTextInput
+                    }
+                    val next = store.updateFeatures { f -> f.copy(wol = f.wol.copy(mac = norm)) }
                     host.onStateChanged(next)
-                    toast("Плитка WOL скрыта")
-                    return@showTextInput
-                }
-                val norm = CustomShortcuts.normalizeMac(raw)
-                if (norm == null) {
-                    toast("Некорректный MAC-адрес")
-                    return@showTextInput
-                }
-                val next = store.updateFeatures { f -> f.copy(wol = f.wol.copy(mac = norm)) }
-                host.onStateChanged(next)
-                ioRunner {
-                    val res = WolSender.send(next.features.wol, SystemStatusHelper.readSystemStatus(activity).ip)
-                    mainHandler.post { toast("Сохранено · ${res.message}") }
-                }
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+                    ioRunner {
+                        val res = WolSender.send(next.features.wol, SystemStatusHelper.readSystemStatus(activity).ip)
+                        mainHandler.post { toast("Сохранено · ${res.message}") }
+                    }
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun exportBackup() {
@@ -300,6 +309,7 @@ internal class SettingsExtraHelper(
         ioRunner {
             val res = SettingsBackupCodec.exportToDisk(activity.applicationContext, snapshot)
             mainHandler.post {
+                if (activity.isFinishing || activity.isDestroyed) return@post
                 backupNote = res.message
                 toast(res.message)
                 bindRows()
@@ -312,6 +322,7 @@ internal class SettingsExtraHelper(
         ioRunner {
             val res = SettingsBackupCodec.importFromDisk(activity.applicationContext, current)
             mainHandler.post {
+                if (activity.isFinishing || activity.isDestroyed) return@post
                 val restored = res.state
                 if (res.success && restored != null) {
                     val applied = SettingsBackupCodec.applyImportedState(store, restored)
@@ -321,6 +332,12 @@ internal class SettingsExtraHelper(
                 toast(res.message)
             }
         }
+    }
+
+    private fun showManaged(build: (() -> Unit) -> Dialog) {
+        var dlg: Dialog? = null
+        dlg = build { dlg?.let { host.onDialogDismissed(it) } }
+        host.onDialogShown(dlg)
     }
 
     private fun line(name: String, value: String): String = "$name    ·   $value"

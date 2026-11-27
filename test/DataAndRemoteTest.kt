@@ -42,12 +42,17 @@ object DataAndRemoteTest {
     fun main(args: Array<String>) {
         testSettingsBackupRoundTripAndInvalid()
         testWeatherForecastAndGeocodingParsing()
+        testWeatherMonotonicCacheAndBoundedRead()
         testOnlineWallpaperBingAndWikiParsing()
+        testOnlineWallpaperPartialReadPruneAndBackoff()
+        testSleepTriggerStateIdempotencyAndFadeCancel()
         testRootBridgePackageProtection()
         testWebRemoteAuthAndConstantTime()
         testWebRemotePinThrottlingLockoutAndRecovery()
         testWebRemoteRoutingAndValidation()
         testWebRemoteWallpaperUploadSecurity()
+        testWallpaperFileHeaderMin64AndMagic()
+        testLanWebRemoteServerHardening()
         testSystemStatusGpuDevfreqDiscovery()
         testSystemStatusThermalZoneDiscovery()
 
@@ -81,11 +86,25 @@ object DataAndRemoteTest {
             )
         )
         val json = SettingsBackupCodec.encode(orig)
-        val decoded = SettingsBackupCodec.decode(json)
+        check("backup JSON omits plaintext PIN value", !json.contains("482910"))
+        check("backup JSON omits pin key", !json.contains("\"pin\""))
+
+        val existingDevice = LauncherState(
+            features = FeatureState(webRemote = WebRemoteConfig(enabled = false, port = 8765, pin = "999888"))
+        )
+        val decoded = SettingsBackupCodec.decode(json, fallback = existingDevice)
         check("backup decode non-null", decoded != null)
         checkEq("backup round-trip appearance", orig.appearance, decoded?.appearance)
         checkEq("backup round-trip layout", orig.layout, decoded?.layout)
-        checkEq("backup round-trip features", orig.features, decoded?.features)
+        val expectedFeatures = orig.features.copy(
+            webRemote = orig.features.webRemote.copy(pin = "999888")
+        )
+        checkEq("backup round-trip features preserves device PIN", expectedFeatures, decoded?.features)
+
+        val craftedWithPin = """{"schemaVersion":3,"webRemote":{"enabled":true,"port":8888,"pin":"111111"}}"""
+        val decodedCrafted = SettingsBackupCodec.decode(craftedWithPin, fallback = existingDevice)
+        checkEq("crafted backup JSON cannot overwrite device PIN", "999888", decodedCrafted?.features?.webRemote?.pin)
+        checkEq("crafted backup JSON still restores port", 8888, decodedCrafted?.features?.webRemote?.port)
 
         checkEq("invalid JSON returns null", null, SettingsBackupCodec.decode("{broken"))
         checkEq("future schemaVersion=99 rejected", null, SettingsBackupCodec.decode("{\"schemaVersion\":99}"))
@@ -389,15 +408,303 @@ object DataAndRemoteTest {
         }
     }
 
+    private fun testWeatherMonotonicCacheAndBoundedRead() {
+        val cfg = WeatherConfig("Казань", 55.7961, 49.1064)
+        val other = WeatherConfig("Москва", 55.7558, 37.6173)
+        val snap = com.will.ambienthome.model.WeatherSnapshot(
+            cityName = "Казань", tempC = 2, feelsLikeC = 0, windKmh = 10,
+            icon = WeatherIcon.CLEAR, condition = "Ясно", fetchedAtMs = 999_999_999_999L
+        )
+        WeatherClient.clearCacheForTest()
+        checkEq("empty weather cache is stale", true, WeatherClient.isStale(cfg, 10_000L))
+        WeatherClient.putCacheForTest(cfg, snap, fetchedElapsedMs = 10_000L)
+        checkEq("atomic weather cache hit", snap, WeatherClient.getCached(cfg))
+        checkEq("different city misses cache", null, WeatherClient.getCached(other))
+        checkEq("fresh before monotonic TTL despite wall clock", false, WeatherClient.isStale(cfg, 10_000L + WeatherClient.REFRESH_TTL_MS - 1L))
+        checkEq("stale at monotonic TTL boundary", true, WeatherClient.isStale(cfg, 10_000L + WeatherClient.REFRESH_TTL_MS))
+        checkEq("stale if monotonic clock inverted", true, WeatherClient.isStale(cfg, 9_999L))
+        WeatherClient.clearCacheForTest()
+
+        val exactCap = ByteArray(OnlineWallpaperProvider.MAX_HTTP_JSON_BYTES) { 'a'.code.toByte() }
+        val exactRead = OnlineWallpaperProvider.readBoundedUtf8(java.io.ByteArrayInputStream(exactCap))
+        checkEq("bounded reader accepts exact 256KB", OnlineWallpaperProvider.MAX_HTTP_JSON_BYTES, exactRead?.length)
+        val overCap = ByteArray(OnlineWallpaperProvider.MAX_HTTP_JSON_BYTES + 1) { 'a'.code.toByte() }
+        checkEq("bounded reader rejects 256KB + 1B", null, OnlineWallpaperProvider.readBoundedUtf8(java.io.ByteArrayInputStream(overCap)))
+    }
+
+    private fun testOnlineWallpaperPartialReadPruneAndBackoff() {
+        val tmpRoot = java.nio.file.Files.createTempDirectory("ambient_wp_test").toFile()
+        try {
+            // 1-byte-per-read JPEG stream (TLS split packet regression)
+            val jpegPayload = ByteArray(9000) { 0x42 }
+            jpegPayload[0] = 0xFF.toByte()
+            jpegPayload[1] = 0xD8.toByte()
+            jpegPayload[2] = 0xFF.toByte()
+            val oneByteStream = object : java.io.InputStream() {
+                private var idx = 0
+                override fun read(): Int = if (idx < jpegPayload.size) jpegPayload[idx++].toInt() and 0xFF else -1
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (idx >= jpegPayload.size) return -1
+                    b[off] = jpegPayload[idx++]
+                    return 1
+                }
+            }
+            val outJpg = java.io.File(tmpRoot, "partial.jpg")
+            checkEq("1-byte chunked valid JPEG accepted", true, OnlineWallpaperProvider.streamWithMagicCheck(oneByteStream, outJpg))
+            checkEq("1-byte chunked JPEG full size written", 9000L, outJpg.length())
+
+            val badPayload = ByteArray(9000) { 0x41 }
+            val badOneByte = object : java.io.InputStream() {
+                private var idx = 0
+                override fun read(): Int = if (idx < badPayload.size) badPayload[idx++].toInt() and 0xFF else -1
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (idx >= badPayload.size) return -1
+                    b[off] = badPayload[idx++]
+                    return 1
+                }
+            }
+            checkEq("1-byte chunked non-JPEG rejected", false, OnlineWallpaperProvider.streamWithMagicCheck(badOneByte, java.io.File(tmpRoot, "bad.jpg")))
+            checkEq("2-byte truncated JPEG rejected", false, OnlineWallpaperProvider.streamWithMagicCheck(java.io.ByteArrayInputStream(byteArrayOf(0xFF.toByte(), 0xD8.toByte())), java.io.File(tmpRoot, "short.jpg")))
+
+            // Cache pruning by lastModified() descending (wiki file must NOT pin over newer Bing files)
+            val cacheDir = java.io.File(tmpRoot, "cache").apply { mkdirs() }
+            val nowMs = System.currentTimeMillis()
+            val wikiOld = java.io.File(cacheDir, "daily_wiki_999.jpg").apply { writeBytes(jpegPayload); setLastModified(nowMs - 400_000L) }
+            val bing1 = java.io.File(cacheDir, "daily_20261125.jpg").apply { writeBytes(jpegPayload); setLastModified(nowMs - 300_000L) }
+            val bing2 = java.io.File(cacheDir, "daily_20261126.jpg").apply { writeBytes(jpegPayload); setLastModified(nowMs - 200_000L) }
+            val bing3 = java.io.File(cacheDir, "daily_20261127.jpg").apply { writeBytes(jpegPayload); setLastModified(nowMs - 100_000L) }
+            val captions = mutableMapOf(
+                wikiOld.name to "Old Wiki",
+                bing1.name to "Bing 1",
+                bing2.name to "Bing 2",
+                bing3.name to "Bing 3"
+            )
+            OnlineWallpaperProvider.pruneOldCache(cacheDir, captions)
+            checkEq("old daily_wiki evicted by mtime", false, wikiOld.exists())
+            checkEq("old daily_wiki caption removed", false, captions.containsKey(wikiOld.name))
+            checkEq("newer Bing 1 retained", true, bing1.exists())
+            checkEq("newer Bing 2 retained", true, bing2.exists())
+            checkEq("newer Bing 3 retained", true, bing3.exists())
+
+            // Offline failure backoff when cache is empty
+            OnlineWallpaperProvider.resetRefreshThrottleForTest()
+            checkEq("initial refresh allowed when cache empty", true, OnlineWallpaperProvider.shouldAttemptRefresh(10_000L, hasCache = false, force = false))
+            OnlineWallpaperProvider.recordAttemptResult(10_000L, success = false)
+            checkEq("offline backoff blocks immediate retry with empty cache", false, OnlineWallpaperProvider.shouldAttemptRefresh(10_000L + 60_000L, hasCache = false, force = false))
+            checkEq("force bypasses offline backoff", true, OnlineWallpaperProvider.shouldAttemptRefresh(10_000L + 60_000L, hasCache = false, force = true))
+            checkEq("offline backoff expires after 15 min", true, OnlineWallpaperProvider.shouldAttemptRefresh(10_000L + OnlineWallpaperProvider.FAILURE_BACKOFF_MS, hasCache = false, force = false))
+            OnlineWallpaperProvider.recordAttemptResult(1_000_000L, success = true)
+            checkEq("success enforces 12h cooldown with cache", false, OnlineWallpaperProvider.shouldAttemptRefresh(1_000_000L + 3600_000L, hasCache = true, force = false))
+            checkEq("12h cooldown expires", true, OnlineWallpaperProvider.shouldAttemptRefresh(1_000_000L + OnlineWallpaperProvider.REFRESH_INTERVAL_MS, hasCache = true, force = false))
+            OnlineWallpaperProvider.resetRefreshThrottleForTest()
+        } finally {
+            tmpRoot.deleteRecursively()
+        }
+    }
+
+    private fun testSleepTriggerStateIdempotencyAndFadeCancel() {
+        val st = SleepTriggerState()
+        checkEq("unarmed trigger rejected", -1L, st.tryBeginSleep())
+
+        val (armGen, armRestore) = st.arm(50_000L)
+        check("arm returns positive gen", armGen > 0L)
+        checkEq("arm from idle needs no vol restore", -1, armRestore)
+        checkEq("armed deadline exposed", 50_000L, st.snapshotDeadline())
+
+        val fireGen = st.tryBeginSleep()
+        check("first trigger succeeds", fireGen > armGen)
+        checkEq("disarmed after trigger", 0L, st.snapshotDeadline())
+        checkEq("duplicate alarm during fade rejected", -1L, st.tryBeginSleep())
+
+        st.recordOriginalVolume(fireGen, 14)
+        checkEq("completeFade succeeds for active gen", true, st.completeFade(fireGen))
+        checkEq("late alarm AFTER finishSleep STILL rejected (H1)", -1L, st.tryBeginSleep())
+
+        // Fade cancel mid-fade restores original volume and invalidates old generation (M2)
+        st.arm(90_000L)
+        val gen2 = st.tryBeginSleep()
+        st.recordOriginalVolume(gen2, 11)
+        checkEq("isFading true before cancel", true, st.isCurrent(gen2, requireFading = true))
+        val (_, cancelRestore) = st.cancel()
+        checkEq("mid-fade cancel returns original volume 11", 11, cancelRestore)
+        checkEq("old fade gen invalidated after cancel", false, st.isCurrent(gen2, requireFading = true))
+        checkEq("old completeFade rejected after cancel", false, st.completeFade(gen2))
+        checkEq("second cancel does not re-restore volume", -1, st.cancel().second)
+    }
+
+    private fun testWallpaperFileHeaderMin64AndMagic() {
+        val tmpRoot = java.nio.file.Files.createTempDirectory("ambient_magic_test").toFile()
+        try {
+            val png64 = ByteArray(64).apply {
+                val h = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+                System.arraycopy(h, 0, this, 0, h.size)
+            }
+            val png63 = png64.copyOf(63)
+            val jpg64 = ByteArray(64).apply {
+                this[0] = 0xFF.toByte(); this[1] = 0xD8.toByte(); this[2] = 0xFF.toByte()
+            }
+            val webp64 = ByteArray(64).apply {
+                "RIFF".toByteArray().copyInto(this, 0)
+                "WEBP".toByteArray().copyInto(this, 8)
+            }
+            val html200 = "<html><body>not an image</body></html>".repeat(6).toByteArray()
+
+            val fPng64 = java.io.File(tmpRoot, "small.png").apply { writeBytes(png64) }
+            val fPng63 = java.io.File(tmpRoot, "tiny.png").apply { writeBytes(png63) }
+            val fJpg64 = java.io.File(tmpRoot, "small.jpg").apply { writeBytes(jpg64) }
+            val fWebp64 = java.io.File(tmpRoot, "small.webp").apply { writeBytes(webp64) }
+            val fFakeJpg = java.io.File(tmpRoot, "fake.jpg").apply { writeBytes(html200) }
+            val fPngAsJpg = java.io.File(tmpRoot, "mismatch.jpg").apply { writeBytes(png64) }
+
+            checkEq("valid 64B PNG accepted", true, LanWebRemoteRouter.hasValidImageFileHeader(fPng64))
+            checkEq("63B PNG below min threshold rejected", false, LanWebRemoteRouter.hasValidImageFileHeader(fPng63))
+            checkEq("valid 64B JPEG accepted", true, LanWebRemoteRouter.hasValidImageFileHeader(fJpg64))
+            checkEq("valid 64B WebP accepted", true, LanWebRemoteRouter.hasValidImageFileHeader(fWebp64))
+            checkEq("200B HTML renamed .jpg rejected", false, LanWebRemoteRouter.hasValidImageFileHeader(fFakeJpg))
+            checkEq("64B PNG renamed .jpg rejected", false, LanWebRemoteRouter.hasValidImageFileHeader(fPngAsJpg))
+        } finally {
+            tmpRoot.deleteRecursively()
+        }
+    }
+
+    private fun testLanWebRemoteServerHardening() {
+        val backend = FakeBackend(pin = "739104")
+        val router = LanWebRemoteRouter(backend)
+        val server = LanWebRemoteServer(
+            port = 0,
+            router = router,
+            socketTimeoutMs = 400,
+            headerDeadlineMs = 350L,
+            bodyDeadlineMs = 350L
+        )
+        checkEq("server starts on ephemeral port", true, server.start())
+        val port = server.boundPort()
+        try {
+            // 1. Security headers + version 3.0.1 on GET /api/ping
+            val pingRaw = rawHttp(port, "GET /api/ping HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            check("ping HTTP 200", pingRaw.startsWith("HTTP/1.1 200 OK\r\n"))
+            check("header X-Frame-Options: DENY", pingRaw.contains("X-Frame-Options: DENY\r\n"))
+            check("header Referrer-Policy: no-referrer", pingRaw.contains("Referrer-Policy: no-referrer\r\n"))
+            check("header X-Content-Type-Options: nosniff", pingRaw.contains("X-Content-Type-Options: nosniff\r\n"))
+            check("header Cache-Control: no-store", pingRaw.contains("Cache-Control: no-store\r\n"))
+            check("header CSP frame-ancestors none", pingRaw.contains("Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n"))
+            check("ping reports version 3.0.1", pingRaw.contains("\"version\":\"3.0.1\""))
+
+            // 2. Clean TCP EOF writes 0 bytes (never 431)
+            val eofBytes = java.net.Socket("127.0.0.1", port).use { s ->
+                s.soTimeout = 1000
+                s.shutdownOutput()
+                s.getInputStream().readAllBytes()
+            }
+            checkEq("clean TCP EOF returns 0 bytes (no 431)", 0, eofBytes.size)
+
+            // 3. Single auth check per authorized request (no duplicate checkAuthForPath)
+            backend.pinReads = 0
+            val statusRaw = rawHttp(port, "GET /api/status HTTP/1.1\r\nHost: localhost\r\nX-Auth-Token: 739104\r\n\r\n")
+            check("authorized status 200", statusRaw.startsWith("HTTP/1.1 200 OK\r\n"))
+            checkEq("auth checked exactly once per request", 1, backend.pinReads)
+
+            // 4. Expect: 100-continue support
+            val continueRes = java.net.Socket("127.0.0.1", port).use { s ->
+                s.soTimeout = 2000
+                val out = s.getOutputStream()
+                val inp = s.getInputStream()
+                val body = """{"code":23}"""
+                val reqHead = "POST /api/key HTTP/1.1\r\nHost: localhost\r\nX-Auth-Token: 739104\r\nExpect: 100-continue\r\nContent-Length: ${body.length}\r\n\r\n"
+                out.write(reqHead.toByteArray(Charsets.ISO_8859_1))
+                out.flush()
+                val firstBuf = ByteArray(64)
+                val n1 = inp.read(firstBuf)
+                val prelim = if (n1 > 0) String(firstBuf, 0, n1, Charsets.ISO_8859_1) else ""
+                out.write(body.toByteArray(Charsets.UTF_8))
+                out.flush()
+                prelim + String(inp.readAllBytes(), Charsets.UTF_8)
+            }
+            check("Expect: 100-continue yields 100 Continue", continueRes.startsWith("HTTP/1.1 100 Continue\r\n\r\n"))
+            check("Expect: 100-continue completes with 200 OK", continueRes.contains("HTTP/1.1 200 OK\r\n"))
+            checkEq("Expect: 100-continue delivered key 23", 23, backend.lastKey)
+
+            // 5. Slowloris header deadline triggers 408
+            val slowHeaderRes = java.net.Socket("127.0.0.1", port).use { s ->
+                s.soTimeout = 2000
+                val out = s.getOutputStream()
+                val inp = s.getInputStream()
+                try {
+                    out.write("GET /api/ping HTTP/1.1\r\n".toByteArray(Charsets.ISO_8859_1))
+                    out.flush()
+                    repeat(6) {
+                        if (inp.available() > 0) return@repeat
+                        Thread.sleep(90L)
+                        if (inp.available() > 0) return@repeat
+                        out.write("X-Slow: a\r\n".toByteArray(Charsets.ISO_8859_1))
+                        out.flush()
+                    }
+                } catch (_: Throwable) {
+                }
+                readHttpIgnoringReset(inp)
+            }
+            check("Slowloris header deadline returns 408", slowHeaderRes.startsWith("HTTP/1.1 408 Request Timeout\r\n"))
+
+            // 6. Slowloris body deadline triggers 408
+            val slowBodyRes = java.net.Socket("127.0.0.1", port).use { s ->
+                s.soTimeout = 2000
+                val out = s.getOutputStream()
+                val inp = s.getInputStream()
+                try {
+                    out.write("POST /api/key HTTP/1.1\r\nHost: localhost\r\nX-Auth-Token: 739104\r\nContent-Length: 50\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+                    out.flush()
+                    repeat(6) {
+                        if (inp.available() > 0) return@repeat
+                        Thread.sleep(90L)
+                        if (inp.available() > 0) return@repeat
+                        out.write(' '.code)
+                        out.flush()
+                    }
+                } catch (_: Throwable) {
+                }
+                readHttpIgnoringReset(inp)
+            }
+            check("Slowloris body deadline returns 408", slowBodyRes.startsWith("HTTP/1.1 408 Request Timeout\r\n"))
+        } finally {
+            server.stop()
+        }
+    }
+
+    private fun readHttpIgnoringReset(inp: java.io.InputStream): String {
+        val baos = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(1024)
+        try {
+            while (true) {
+                val n = inp.read(buf)
+                if (n <= 0) break
+                baos.write(buf, 0, n)
+            }
+        } catch (_: java.net.SocketException) {
+        }
+        return baos.toByteArray().toString(Charsets.UTF_8)
+    }
+
+    private fun rawHttp(port: Int, payload: String): String =
+        java.net.Socket("127.0.0.1", port).use { s ->
+            s.soTimeout = 2000
+            s.getOutputStream().write(payload.toByteArray(Charsets.ISO_8859_1))
+            s.getOutputStream().flush()
+            String(s.getInputStream().readAllBytes(), Charsets.UTF_8)
+        }
+
     private class FakeBackend(private val pin: String) : LanWebRemoteRouter.Backend {
+        var pinReads: Int = 0
         var lastKey: Int? = null
         var lastText: String? = null
         var lastAction: String? = null
         var lastWallpaperName: String? = null
 
-        override fun currentPin(): String = pin
+        override fun currentPin(): String {
+            pinReads++
+            return pin
+        }
         override fun htmlShell(): ByteArray = "<html><body>Ambient Home Remote</body></html>".toByteArray()
-        override fun statusJson(): Map<String, Any?> = mapOf("ok" to true, "version" to "3.0.0")
+        override fun statusJson(): Map<String, Any?> = mapOf("ok" to true, "version" to "3.0.1")
         override fun dispatchKeyOrText(keyCode: Int?, text: String?): Pair<Boolean, String> {
             lastKey = keyCode
             lastText = text

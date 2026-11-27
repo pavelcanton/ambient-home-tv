@@ -185,6 +185,7 @@ data class DailyWallpaperMeta(
 
 data class AmbientOverlayData(
     val clockStyle: AmbientClockStyle = AmbientClockStyle.THIN,
+    val showClock: Boolean = true,
     val nightActive: Boolean = false,
     val blackout: Boolean = false,
     val weatherSummary: String = "",
@@ -192,6 +193,63 @@ data class AmbientOverlayData(
     val caption: String = "",
     val nowPlayingLine: String = ""
 )
+
+/**
+ * Чистый расчёт геометрии Ambient-часов и метаданных (4-corner hop + минутный дрейф)
+ * с жёсткой гарантией safe-zone на 720p / 1080p / 4K для всех 4 стилей (100% JVM-тестируемый).
+ */
+data class AmbientClockLayout(
+    val corner: Int,
+    val rightAligned: Boolean,
+    val topAnchored: Boolean,
+    val u: Float,
+    val anchorX: Float,
+    val anchorY: Float,
+    val analogRadius: Float,
+    val analogCx: Float,
+    val analogCy: Float,
+    val subY: Float,
+    val nowPlayingY: Float,
+    val maxTextWidth: Float
+) {
+    companion object {
+        fun compute(canvasW: Float, canvasH: Float, tickCount: Int, style: AmbientClockStyle): AmbientClockLayout {
+            val u = (canvasH / 1080f).coerceAtLeast(0.5f)
+            val corner = (tickCount.coerceAtLeast(0) / 15) % 4
+            val driftX = (kotlin.math.sin(tickCount * 0.45) * 24.0).toFloat() * u
+            val driftY = (kotlin.math.cos(tickCount * 0.35) * 18.0).toFloat() * u
+            val rightAligned = corner == 2 || corner == 3
+            val topAnchored = corner == 1 || corner == 2
+            val anchorX = (if (rightAligned) canvasW - 96f * u else 96f * u) + driftX
+            val anchorY = (if (topAnchored) 232f * u else canvasH - 220f * u) + driftY
+            val radius = 84f * u
+            val analogCx = if (rightAligned) anchorX - radius else anchorX + radius
+            val analogCy = anchorY - 76f * u
+            val subY = when (style) {
+                AmbientClockStyle.THIN -> anchorY + 92f * u
+                AmbientClockStyle.CINEMA -> anchorY + 98f * u
+                AmbientClockStyle.MINIMAL -> anchorY + 78f * u
+                AmbientClockStyle.ANALOG -> analogCy + radius + 74f * u
+            }
+            val availW = (if (rightAligned) anchorX - 64f * u else canvasW - anchorX - 64f * u)
+                .coerceAtLeast(240f * u)
+            return AmbientClockLayout(
+                corner = corner,
+                rightAligned = rightAligned,
+                topAnchored = topAnchored,
+                u = u,
+                anchorX = anchorX,
+                anchorY = anchorY,
+                analogRadius = radius,
+                analogCx = analogCx,
+                analogCy = analogCy,
+                subY = subY,
+                nowPlayingY = subY + 34f * u,
+                maxTextWidth = minOf(availW, canvasW * 0.58f)
+            )
+        }
+    }
+}
 
 data class QuickControlState(
     val nightActive: Boolean,

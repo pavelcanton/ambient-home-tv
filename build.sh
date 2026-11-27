@@ -155,7 +155,9 @@ else
             src/com/will/ambienthome/data/WeatherClient.kt \
             src/com/will/ambienthome/data/OnlineWallpaperProvider.kt \
             src/com/will/ambienthome/data/LanWebRemoteRouter.kt \
+            src/com/will/ambienthome/data/LanWebRemoteServer.kt \
             src/com/will/ambienthome/data/RootBridgeClient.kt \
+            src/com/will/ambienthome/data/SleepTimerController.kt \
             src/com/will/ambienthome/data/SystemStatusHelper.kt
         find test -type f -name '*.kt' | sort
     } > "$TEST_LIST"

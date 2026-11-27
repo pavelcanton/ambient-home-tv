@@ -44,20 +44,27 @@ object MiniJson {
         return sb.toString()
     }
 
-    fun asDouble(v: Any?): Double? = when (v) {
-        is Double -> v
-        is Long -> v.toDouble()
-        is Int -> v.toDouble()
-        is Float -> v.toDouble()
-        is Number -> v.toDouble()
-        else -> null
+    fun asDouble(v: Any?): Double? {
+        val d = when (v) {
+            is Double -> v
+            is Long -> v.toDouble()
+            is Int -> v.toDouble()
+            is Float -> v.toDouble()
+            is Number -> v.toDouble()
+            else -> return null
+        }
+        return if (d.isFinite()) d else null
     }
 
     fun asInt(v: Any?): Int? = when (v) {
         is Int -> v
-        is Long -> v.toInt()
-        is Double -> v.toInt()
-        is Number -> v.toInt()
+        is Long -> if (v in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) v.toInt() else null
+        is Double -> if (v.isFinite() && v >= Int.MIN_VALUE.toDouble() && v <= Int.MAX_VALUE.toDouble()) v.toInt() else null
+        is Float -> if (v.isFinite() && v >= Int.MIN_VALUE.toFloat() && v <= Int.MAX_VALUE.toFloat()) v.toInt() else null
+        is Number -> {
+            val d = v.toDouble()
+            if (d.isFinite() && d >= Int.MIN_VALUE.toDouble() && d <= Int.MAX_VALUE.toDouble()) d.toInt() else null
+        }
         else -> null
     }
 
@@ -240,7 +247,17 @@ object MiniJson {
 
         private fun readUnicodeEscape(): Char {
             if (pos + 4 > s.length) fail()
-            val code = s.substring(pos, pos + 4).toIntOrNull(16) ?: fail()
+            var code = 0
+            for (i in 0 until 4) {
+                val ch = s[pos + i]
+                val digit = when (ch) {
+                    in '0'..'9' -> ch - '0'
+                    in 'a'..'f' -> ch - 'a' + 10
+                    in 'A'..'F' -> ch - 'A' + 10
+                    else -> fail()
+                }
+                code = (code shl 4) or digit
+            }
             pos += 4
             return code.toChar()
         }
@@ -271,8 +288,15 @@ object MiniJson {
                 while (pos < s.length && s[pos] in '0'..'9') pos++
             }
             val token = s.substring(start, pos)
-            return if (isFloat) token.toDoubleOrNull() ?: fail()
-            else token.toLongOrNull() ?: token.toDoubleOrNull() ?: fail()
+            if (isFloat) {
+                val d = token.toDoubleOrNull() ?: fail()
+                if (!d.isFinite()) fail()
+                return d
+            }
+            token.toLongOrNull()?.let { return it }
+            val d = token.toDoubleOrNull() ?: fail()
+            if (!d.isFinite()) fail()
+            return d
         }
 
         private fun isWs(c: Char): Boolean = c == ' ' || c == '\t' || c == '\n' || c == '\r'

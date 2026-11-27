@@ -30,7 +30,10 @@ object AmbientFeaturesTest {
         testCustomShortcutsMacAndMagicPacket()
         testCustomShortcutsBroadcastHelpers()
         testMiniJsonParsingAndSerialization()
+        testMiniJsonStrictUnicodeBoundsAndNonFinite()
         testClockStylesAndSleepBadge()
+        testAmbientClockLayoutSafeBoundsAllResolutions()
+        testAmbientOverlayBlackoutDecoupledFromShowClock()
 
         println("AmbientFeaturesTest: passed=$passed failed=$failed")
         if (failed > 0) System.exit(1)
@@ -158,5 +161,71 @@ object AmbientFeaturesTest {
         checkEq("sleep 2520s shows 42м", "42м", SleepTimerState(true, 2520).badgeText)
         checkEq("weather temp positive prefix", "+4°", WeatherSnapshot("M", 4, 2, 10, WeatherIcon.CLEAR, "Ясно").pillTempText)
         checkEq("weather temp negative", "-12°", WeatherSnapshot("M", -12, -16, 8, WeatherIcon.SNOW, "Снег").pillTempText)
+    }
+
+    private fun testMiniJsonStrictUnicodeBoundsAndNonFinite() {
+        checkEq("valid lowercase hex \\u0430", "а", MiniJson.parseObject("""{"s":"\u0430"}""")?.get("s"))
+        checkEq("valid uppercase hex \\u041F", "П", MiniJson.parseObject("""{"s":"\u041F"}""")?.get("s"))
+        checkEq("signed negative \\u-001 rejected", null, MiniJson.parseObject("""{"s":"\u-001"}"""))
+        checkEq("signed positive \\u+001 rejected", null, MiniJson.parseObject("""{"s":"\u+001"}"""))
+        checkEq("space in \\u 041 rejected", null, MiniJson.parseObject("""{"s":"\u 041"}"""))
+        checkEq("non-hex \\u041g rejected", null, MiniJson.parseObject("""{"s":"\u041g"}"""))
+
+        checkEq("asInt max int ok", Int.MAX_VALUE, MiniJson.asInt(Int.MAX_VALUE.toLong()))
+        checkEq("asInt min int ok", Int.MIN_VALUE, MiniJson.asInt(Int.MIN_VALUE.toLong()))
+        checkEq("asInt overflow Long -> null", null, MiniJson.asInt(Int.MAX_VALUE.toLong() + 1L))
+        checkEq("asInt wrap-around 4294967319L -> null", null, MiniJson.asInt(4_294_967_319L))
+        checkEq("asInt underflow Long -> null", null, MiniJson.asInt(Int.MIN_VALUE.toLong() - 1L))
+        checkEq("asInt +Infinity -> null", null, MiniJson.asInt(Double.POSITIVE_INFINITY))
+        checkEq("asInt NaN -> null", null, MiniJson.asInt(Double.NaN))
+        checkEq("asDouble +Infinity -> null", null, MiniJson.asDouble(Double.POSITIVE_INFINITY))
+        checkEq("asDouble NaN -> null", null, MiniJson.asDouble(Double.NaN))
+        checkEq("JSON overflow 1e309 rejected", null, MiniJson.parseObject("""{"x":1e309}"""))
+        checkEq("JSON overflow -1e400 rejected", null, MiniJson.parseObject("""{"x":-1e400}"""))
+    }
+
+    private fun testAmbientClockLayoutSafeBoundsAllResolutions() {
+        val resolutions = listOf(1280f to 720f, 1920f to 1080f, 3840f to 2160f)
+        for ((w, h) in resolutions) {
+            var allVerticalSafe = true
+            var allHorizontalSafe = true
+            var allAnalogDialSafe = true
+            var worstBottomU = 0f
+            var minTextWidthU = Float.MAX_VALUE
+            for (style in AmbientClockStyle.entries) {
+                for (tick in 0 until 60) {
+                    val l = AmbientClockLayout.compute(w, h, tick, style)
+                    val bottomU = (l.nowPlayingY + 12f * l.u) / l.u
+                    if (bottomU > worstBottomU) worstBottomU = bottomU
+                    if (bottomU > 1044f) allVerticalSafe = false
+                    val edgeMarginU = if (l.rightAligned) (w - l.anchorX) / l.u else l.anchorX / l.u
+                    if (edgeMarginU < 68f) allHorizontalSafe = false
+                    val textWidthU = l.maxTextWidth / l.u
+                    if (textWidthU < minTextWidthU) minTextWidthU = textWidthU
+                    if (style == AmbientClockStyle.ANALOG) {
+                        val dialTopU = (l.analogCy - l.analogRadius) / l.u
+                        val dialBotU = (l.analogCy + l.analogRadius) / l.u
+                        val dialLeftU = (l.analogCx - l.analogRadius) / l.u
+                        val dialRightU = (l.analogCx + l.analogRadius) / l.u
+                        if (dialTopU < 44f || dialBotU > 920f || dialLeftU < 64f || dialRightU > (w / l.u) - 64f) {
+                            allAnalogDialSafe = false
+                        }
+                    }
+                }
+            }
+            val label = "${w.toInt()}x${h.toInt()}"
+            check("$label vertical safe <=1044u (worst=$worstBottomU)", allVerticalSafe)
+            check("$label horizontal safe >=68u", allHorizontalSafe)
+            check("$label analog dial inside safe-zone", allAnalogDialSafe)
+            check("$label maxTextWidth >= 500u (min=$minTextWidthU)", minTextWidthU >= 500f)
+        }
+    }
+
+    private fun testAmbientOverlayBlackoutDecoupledFromShowClock() {
+        val ov = AmbientOverlayData(showClock = false, blackout = true)
+        checkEq("blackout true even when showClock=false", true, ov.blackout)
+        checkEq("showClock preserved false", false, ov.showClock)
+        val def = AmbientOverlayData()
+        checkEq("default showClock is true", true, def.showClock)
     }
 }

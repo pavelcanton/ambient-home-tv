@@ -82,8 +82,7 @@ object SettingsBackupCodec {
         )
         root["webRemote"] = mapOf(
             "enabled" to ft.webRemote.enabled,
-            "port" to ft.webRemote.port,
-            "pin" to ft.webRemote.pin
+            "port" to ft.webRemote.port
         )
     }
 
@@ -137,7 +136,7 @@ object SettingsBackupCodec {
                     lastHandledBootId = cur.bootAutoLaunch.lastHandledBootId
                 ),
                 webRemote = restored.features.webRemote.copy(
-                    pin = restored.features.webRemote.pin.ifEmpty { cur.webRemote.pin }
+                    pin = cur.webRemote.pin
                 )
             )
         }
@@ -225,7 +224,7 @@ object SettingsBackupCodec {
         return WebRemoteConfig(
             enabled = (map["enabled"] as? Boolean) ?: base.enabled,
             port = (MiniJson.asInt(map["port"]) ?: base.port).coerceIn(1024, 65535),
-            pin = LauncherStore.sanitizePin((map["pin"] as? String).orEmpty())
+            pin = base.pin
         )
     }
 

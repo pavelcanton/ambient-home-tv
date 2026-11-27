@@ -45,7 +45,8 @@ internal class MainFeatureCoordinator(
         fun currentStatus(): SystemStatus
         fun isNightNow(): Boolean
         fun onStateMutated(next: LauncherState, refreshApps: Boolean = false)
-        fun onDialogChanged(dialog: Dialog?)
+        fun onDialogShown(dialog: Dialog)
+        fun onDialogDismissed(dialog: Dialog)
         fun onEvent(event: Event, arg: String = "")
     }
 
@@ -108,6 +109,9 @@ internal class MainFeatureCoordinator(
     fun onPause() {
         resumed = false
         mainHandler.removeCallbacks(weatherRefreshTask)
+        mainHandler.removeCallbacks(bootTickTask)
+        bootPendingPkg = ""
+        bootBannerText = ""
     }
 
     fun onDestroy() {
@@ -207,21 +211,22 @@ internal class MainFeatureCoordinator(
             webRemotePin = pin,
             usbVolumes = AudioDeviceObserver.listExternalUsbVolumes(activity)
         )
-        val dlg = TvDialogs.showQuickControls(
-            ctx = activity,
-            state = qc,
-            onDismiss = { host.onDialogChanged(null) },
-            listener = object : TvDialogs.QuickControlsListener {
-                override fun onAmbientNow() = host.onEvent(Event.AMBIENT_NOW)
-                override fun onNextWallpaper() = host.onEvent(Event.NEXT_WALLPAPER)
-                override fun onToggleNight() = toggleNightMode()
-                override fun onOpenSleepTimer() = openSleepPicker()
-                override fun onOpenWebRemote() = openWebRemoteDialog()
-                override fun onReconnectWifi() = reconnectWifi()
-                override fun onEjectUsb(vol: UsbVolumeInfo) = ejectUsb(vol)
-            }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            TvDialogs.showQuickControls(
+                ctx = activity,
+                state = qc,
+                onDismiss = onDismiss,
+                listener = object : TvDialogs.QuickControlsListener {
+                    override fun onAmbientNow() = host.onEvent(Event.AMBIENT_NOW)
+                    override fun onNextWallpaper() = host.onEvent(Event.NEXT_WALLPAPER)
+                    override fun onToggleNight() = toggleNightMode()
+                    override fun onOpenSleepTimer() = openSleepPicker()
+                    override fun onOpenWebRemote() = openWebRemoteDialog()
+                    override fun onReconnectWifi() = reconnectWifi()
+                    override fun onEjectUsb(vol: UsbVolumeInfo) = ejectUsb(vol)
+                }
+            )
+        }
     }
 
     private fun openWeatherDialog() {
@@ -230,84 +235,89 @@ internal class MainFeatureCoordinator(
             openCityPicker()
             return
         }
-        val dlg = FeatureDialogs.showWeatherForecast(
-            ctx = activity,
-            snap = snap,
-            onRefresh = { refreshWeatherIfDue(force = true) },
-            onChangeCity = { openCityPicker() },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showWeatherForecast(
+                ctx = activity,
+                snap = snap,
+                onRefresh = { refreshWeatherIfDue(force = true) },
+                onChangeCity = { openCityPicker() },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openSleepPicker() {
         val st = host.currentState()
-        val dlg = FeatureDialogs.showSleepTimerPicker(
-            ctx = activity,
-            current = SleepTimerController.currentState(),
-            hdmiOffEnabled = st.features.sleepHdmiOff,
-            bridgeAvailable = RootBridgeClient.isAvailable(activity),
-            onPickMinutes = { mins ->
-                SleepTimerController.startTimer(activity, mins)
-                toast(if (mins > 0) "Таймер сна: $mins мин" else "Таймер сна выключен")
-            },
-            onToggleHdmiOff = {
-                val next = store.updateFeatures { it.copy(sleepHdmiOff = !it.sleepHdmiOff) }
-                host.onStateMutated(next)
-                openSleepPicker()
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showSleepTimerPicker(
+                ctx = activity,
+                current = SleepTimerController.currentState(),
+                hdmiOffEnabled = st.features.sleepHdmiOff,
+                bridgeAvailable = RootBridgeClient.isAvailable(activity),
+                onPickMinutes = { mins ->
+                    SleepTimerController.startTimer(activity, mins)
+                    toast(if (mins > 0) "Таймер сна: $mins мин" else "Таймер сна выключен")
+                },
+                onToggleHdmiOff = {
+                    val next = store.updateFeatures { it.copy(sleepHdmiOff = !it.sleepHdmiOff) }
+                    host.onStateMutated(next)
+                    openSleepPicker()
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openCityPicker() {
         val cur = host.currentState().features.weather.cityName
-        val dlg = FeatureDialogs.showCityPicker(
-            ctx = activity,
-            presets = WeatherClient.RU_CITY_PRESETS,
-            currentCity = cur,
-            onPick = { city ->
-                val next = store.updateFeatures { it.copy(weather = WeatherConfig(city.name, city.lat, city.lon)) }
-                host.onStateMutated(next)
-                refreshWeatherIfDue(force = true)
-            },
-            onSearchPrompt = { openCitySearchInput() },
-            onDisable = {
-                val next = store.updateFeatures { it.copy(weather = WeatherConfig()) }
-                weatherSnapshot = null
-                host.onStateMutated(next)
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showCityPicker(
+                ctx = activity,
+                presets = WeatherClient.RU_CITY_PRESETS,
+                currentCity = cur,
+                onPick = { city ->
+                    val next = store.updateFeatures { it.copy(weather = WeatherConfig(city.name, city.lat, city.lon)) }
+                    host.onStateMutated(next)
+                    refreshWeatherIfDue(force = true)
+                },
+                onSearchPrompt = { openCitySearchInput() },
+                onDisable = {
+                    val next = store.updateFeatures { it.copy(weather = WeatherConfig()) }
+                    weatherSnapshot = null
+                    host.onStateMutated(next)
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openCitySearchInput() {
-        val dlg = FeatureDialogs.showTextInput(
-            ctx = activity,
-            title = "Поиск города (Open-Meteo)",
-            hint = "Например: Москва или Казань",
-            initialValue = host.currentState().features.weather.cityName,
-            onSubmit = { query ->
-                if (query.length < 2) return@showTextInput
-                ioRunner {
-                    val found = WeatherClient.searchCity(query).firstOrNull()
-                    mainHandler.post {
-                        if (found != null) {
-                            val next = store.updateFeatures {
-                                it.copy(weather = WeatherConfig(found.name, found.lat, found.lon))
-                            }
-                            host.onStateMutated(next)
-                            refreshWeatherIfDue(force = true)
-                            toast("Город: ${found.name}")
-                        } else toast("Город не найден")
+        showManaged { onDismiss ->
+            FeatureDialogs.showTextInput(
+                ctx = activity,
+                title = "Поиск города (Open-Meteo)",
+                hint = "Например: Москва или Казань",
+                initialValue = host.currentState().features.weather.cityName,
+                onSubmit = { query ->
+                    if (query.length < 2) return@showTextInput
+                    ioRunner {
+                        val found = WeatherClient.searchCity(query).firstOrNull()
+                        mainHandler.post {
+                            if (activity.isFinishing || activity.isDestroyed) return@post
+                            if (found != null) {
+                                val next = store.updateFeatures {
+                                    it.copy(weather = WeatherConfig(found.name, found.lat, found.lon))
+                                }
+                                host.onStateMutated(next)
+                                refreshWeatherIfDue(force = true)
+                                toast("Город: ${found.name}")
+                            } else toast("Город не найден")
+                        }
                     }
-                }
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+                },
+                onDismiss = onDismiss
+            )
+        }
     }
 
     private fun openWebRemoteDialog() {
@@ -315,28 +325,35 @@ internal class MainFeatureCoordinator(
         val pin = LanWebRemoteService.ensurePinGenerated(store)
         val ip = host.currentStatus().ip.ifEmpty { "<IP ТВ>" }
         val url = "http://$ip:${st.features.webRemote.port}"
-        val dlg = FeatureDialogs.showWebRemoteInfo(
-            ctx = activity,
-            enabled = st.features.webRemote.enabled,
-            url = url,
-            pin = pin,
-            onToggleEnabled = {
-                val next = store.updateFeatures { f ->
-                    f.copy(webRemote = f.webRemote.copy(enabled = !f.webRemote.enabled))
-                }
-                LanWebRemoteService.syncRunning(activity, next.features.webRemote.enabled)
-                host.onStateMutated(next)
-            },
-            onRotatePin = {
-                val newPin = LauncherStore.generatePin()
-                val next = store.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(pin = newPin)) }
-                host.onStateMutated(next)
-                toast("Новый PIN: $newPin")
-                openWebRemoteDialog()
-            },
-            onDismiss = { host.onDialogChanged(null) }
-        )
-        host.onDialogChanged(dlg)
+        showManaged { onDismiss ->
+            FeatureDialogs.showWebRemoteInfo(
+                ctx = activity,
+                enabled = st.features.webRemote.enabled,
+                url = url,
+                pin = pin,
+                onToggleEnabled = {
+                    val next = store.updateFeatures { f ->
+                        f.copy(webRemote = f.webRemote.copy(enabled = !f.webRemote.enabled))
+                    }
+                    LanWebRemoteService.syncRunning(activity, next.features.webRemote.enabled)
+                    host.onStateMutated(next)
+                },
+                onRotatePin = {
+                    val newPin = LauncherStore.generatePin()
+                    val next = store.updateFeatures { f -> f.copy(webRemote = f.webRemote.copy(pin = newPin)) }
+                    host.onStateMutated(next)
+                    toast("Новый PIN: $newPin")
+                    openWebRemoteDialog()
+                },
+                onDismiss = onDismiss
+            )
+        }
+    }
+
+    private fun showManaged(build: (() -> Unit) -> Dialog) {
+        var dlg: Dialog? = null
+        dlg = build { dlg?.let { host.onDialogDismissed(it) } }
+        host.onDialogShown(dlg)
     }
 
     private fun toggleNightMode() {
@@ -358,6 +375,7 @@ internal class MainFeatureCoordinator(
         ioRunner {
             val res = RootBridgeClient.sendEject(activity.applicationContext, vol.id)
             mainHandler.post {
+                if (activity.isFinishing || activity.isDestroyed) return@post
                 if (res.ok) toast("USB безопасно извлечён: ${vol.label}")
                 else AudioDeviceObserver.openStorageSettings(activity)
             }

@@ -46,6 +46,7 @@ class MediaSessionBridge(
         }
         val msm = appContext.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager ?: return
         val listener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
+            if (!started) return@OnActiveSessionsChangedListener
             bindBestController(controllers.orEmpty())
         }
         try {
@@ -102,6 +103,7 @@ class MediaSessionBridge(
     }
 
     private fun bindBestController(controllers: List<MediaController>) {
+        if (!started) return
         val chosen = pickBestController(controllers)
         if (chosen == null) {
             detachController()
@@ -111,9 +113,14 @@ class MediaSessionBridge(
         if (activeController?.sessionToken != chosen.sessionToken) {
             detachController()
             val cb = object : MediaController.Callback() {
-                override fun onPlaybackStateChanged(state: PlaybackState?) = refreshFromController(chosen)
-                override fun onMetadataChanged(metadata: MediaMetadata?) = refreshFromController(chosen)
+                override fun onPlaybackStateChanged(state: PlaybackState?) {
+                    if (started && activeController === chosen) refreshFromController(chosen)
+                }
+                override fun onMetadataChanged(metadata: MediaMetadata?) {
+                    if (started && activeController === chosen) refreshFromController(chosen)
+                }
                 override fun onSessionDestroyed() {
+                    if (!started || activeController !== chosen) return
                     detachController()
                     emit(null)
                 }
@@ -136,6 +143,7 @@ class MediaSessionBridge(
     }
 
     private fun refreshFromController(ctrl: MediaController) {
+        if (!started) return
         val st = ctrl.playbackState?.state
         if (!isPlayingState(st) && !isResumableState(st)) {
             emit(null)
